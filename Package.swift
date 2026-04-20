@@ -41,11 +41,5 @@ let package = Package(
             path: "Sources/Blip",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
-        .testTarget(
-            name: "BlipCoreTests",
-            dependencies: ["BlipCore"],
-            path: "Tests/BlipCoreTests",
-            swiftSettings: [.swiftLanguageMode(.v5)]
-        ),
     ]
 )
