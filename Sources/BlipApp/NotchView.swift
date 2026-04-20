@@ -155,7 +155,7 @@ struct NotchView: View {
                         workingStoppedAt: model.workingStoppedAt,
                         width: 28,
                         walkRange: idlePetWalkRange,
-                        walkSpeed: 32
+                        walkSpeed: 45
                     )
                     // Only the visible header should claim isSource. When the
                     // pill opens, the opened-header pet becomes the source so

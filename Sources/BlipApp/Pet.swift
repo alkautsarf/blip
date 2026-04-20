@@ -573,13 +573,16 @@ struct Pet: View {
     /// Horizontal traversal range (pt). Pet oscillates between x=0 and x=walkRange
     /// during `.working`. Outer frame reserves `width + walkRange` so layout is stable.
     var walkRange: CGFloat = 0
-    /// Pts/sec during traversal — ~30 feels like a leisurely critter pace.
-    var walkSpeed: CGFloat = 30
+    /// Pts/sec during traversal — ~45 lets a full home→edge→home round
+    /// trip fit inside the 16.8s body phase of a script window at typical
+    /// pill widths, while still reading as an unhurried pace.
+    var walkSpeed: CGFloat = 45
     /// Frames-per-second for leg animation.
     var walkFPS: Double = 6.0
-    /// Seconds the pet lingers at each edge of the walk range before
-    /// turning around. 0 = continuous pace (old behavior).
-    var edgeDwell: Double = 3.5
+    /// Seconds the pet lingers at the far edge before turning back home.
+    /// The rest-at-home beat at script boundaries now carries the longer
+    /// breathing pause that old symmetric dwells used to provide.
+    var edgeDwell: Double = 2.0
     var isAnimating: Bool = true
 
     private var cellSize: CGFloat { width / CGFloat(PetFrame.cols) }
@@ -685,12 +688,15 @@ struct Pet: View {
             let step = Int(t * 0.35)
             return (step % 2 == 0) ? .sleepA : .sleepB
         case .idle, .preview, .expand:
-            // "Pack up" beat — pet holds a compact crouch for 0.7s after
-            // typing just ended, reading as "pulling arms in to close
-            // the laptop" before extending into the full idle rest.
-            if let stoppedAt = workingStoppedAt,
-               date.timeIntervalSince(stoppedAt) < 0.7 {
-                return .idleSit
+            // Pet sits (pack-up) briefly, then stands for the rest of
+            // the settle window. Must stay pose-simple here so the pose
+            // matches the x=0 pin that resolveTraversal holds during
+            // settlePause — otherwise the pet shows mid-script activity
+            // frames while stuck at home.
+            if let stoppedAt = workingStoppedAt {
+                let since = date.timeIntervalSince(stoppedAt)
+                if since < 0.7         { return .idleSit }
+                if since < settlePause { return .idle }
             }
             return resolveIdlePose(at: date)
         case .working:
@@ -715,33 +721,48 @@ struct Pet: View {
         }
     }
 
-    /// Idle rotates through a variety pool on a 20s outer cycle so the loop
-    /// never feels obvious. Each 20s period picks a sequence from a set of
-    /// "scripts" (wave-heavy, stretch-heavy, drowsy, curious, dance) — the
-    /// selection is deterministic from the cycle index so the pet can't
-    /// mid-sequence glitch, but the overall effect is varied.
+    /// Idle rotates through a variety pool on a 20s outer cycle. Each 20s
+    /// window is a choreographed 5-phase arc so transitions between scripts
+    /// never snap — pet always passes through `.idle` at x=0 between
+    /// activities:
     ///
-    /// Micro-beats within each 20s window are keyed off fractional cycle
-    /// time. Between beats the pet falls back to `.idle` (rest pose).
-    /// Jumps and body bobs are handled separately in `resolveBounce`.
+    ///   [0.0,  0.4):  universal rest (`.idle`)
+    ///   [0.4,  1.2):  script-specific intro transition (arms rise, sits, etc.)
+    ///   [1.2, 18.0):  body — main animation (16.8s)
+    ///   [18.0, 18.8): script-specific outro transition (arms drop, stands, etc.)
+    ///   [18.8, 20.0): universal rest (`.idle`)
+    ///
+    /// Shared micro-beats (blink, look) fire during body for walking scripts
+    /// only — stationary scripts (meditate, workout, boxing) skip them so
+    /// the trance isn't broken by an errant blink/glance.
     private func resolveIdlePose(at date: Date) -> PetPose {
+        let script = Self.currentScript(at: date)
         let t = date.timeIntervalSinceReferenceDate
-        let cycle = t.truncatingRemainder(dividingBy: Self.scriptWindow)
+        let inScript = t.truncatingRemainder(dividingBy: Self.scriptWindow)
 
-        // Blink + look happen in every script for micro-liveness.
-        if cycle >= 18.2 && cycle < 18.35 { return .idleBlink }
-        if cycle >= 9.0  && cycle < 9.15  { return .idleBlink }
-        if cycle >= 13.0 && cycle < 13.6  { return .idleLookL }
-        if cycle >= 15.0 && cycle < 15.6  { return .idleLookR }
+        // Universal rest bumpers at script boundaries.
+        if inScript < Self.introRestEnd || inScript >= Self.outroRestStart { return .idle }
 
-        // Script rotation — shuffled-deck: every 200s "round" plays all
-        // 10 scripts in a random order, then reshuffles.
-        switch Self.currentScript(at: date) {
-        case .wave:       return waveScript(at: t, cycle: cycle)
-        case .stretch:    return stretchScript(cycle: cycle)
-        case .drowsy:     return drowsyScript(cycle: cycle)
-        case .curious:    return curiousScript(cycle: cycle)
-        case .dance:      return danceScript(cycle: cycle)
+        // Script-specific bridge poses lead into / out of the body phase.
+        if inScript < Self.bodyStart  { return script.bridges.intro }
+        if inScript >= Self.bodyEnd   { return script.bridges.outro }
+
+        // Micro-beats only fire for walking scripts — blinking mid-lotus
+        // or mid-boxing-jab would break the trance.
+        let bodyT = inScript - Self.bodyStart
+        if !script.isStationary {
+            if bodyT >= 7.5  && bodyT < 7.65  { return .idleBlink }
+            if bodyT >= 14.5 && bodyT < 14.65 { return .idleBlink }
+            if bodyT >= 11.5 && bodyT < 12.0  { return .idleLookL }
+            if bodyT >= 13.5 && bodyT < 14.0  { return .idleLookR }
+        }
+
+        switch script {
+        case .wave:       return waveScript(at: t, bodyT: bodyT)
+        case .stretch:    return stretchScript(bodyT: bodyT)
+        case .drowsy:     return drowsyScript(bodyT: bodyT)
+        case .curious:    return curiousScript(bodyT: bodyT)
+        case .dance:      return danceScript(bodyT: bodyT)
         case .skate:      return skateScript(at: t)
         case .headphone:  return headphoneScript(at: t)
         case .workout:    return workoutScript(at: t)
@@ -757,8 +778,8 @@ struct Pet: View {
     }
 
     /// The 10 idle scripts in the rotation. Enum (not raw int) so the
-    /// stationary check can't drift if the switch-case ordering ever
-    /// changes — stationary status lives on the case itself.
+    /// per-case properties (stationary, intro/outro bridges) can't drift
+    /// if the switch-case ordering ever changes — they live on the case.
     enum IdleScript: Int, CaseIterable {
         case wave, stretch, drowsy, curious, dance
         case skate, headphone, workout, meditate, boxing
@@ -772,10 +793,40 @@ struct Pet: View {
             default: return false
             }
         }
+
+        /// Bridge poses played as the pet enters / exits the script's body.
+        /// Uses existing frames (no new art) to connect `.idle` (arms
+        /// horizontal, feet planted) to each activity's starting pose and
+        /// back again.
+        var bridges: (intro: PetPose, outro: PetPose) {
+            switch self {
+            case .wave:       return (.idleWavePrep, .idleWavePrep)
+            case .stretch:    return (.idleStretch, .idleStretch)
+            case .drowsy:     return (.idleYawn, .idleSit)
+            case .curious:    return (.idleLookL, .idleScratch)
+            case .dance:      return (.idleStretch, .idleLookR)
+            case .skate:      return (.idleStretch, .idleSit)
+            case .headphone:  return (.idleScratch, .idleScratch)
+            case .workout:    return (.idleStretch, .idleStretch)
+            case .meditate:   return (.idleSit, .idleSit)
+            case .boxing:     return (.idleStretch, .idleScratch)
+            }
+        }
     }
 
     /// Duration (seconds) of a single script window.
     static let scriptWindow: Double = 20.0
+    /// Universal rest phase boundary at the start of each window (0 → rest).
+    static let introRestEnd: Double = 0.4
+    /// Intro transition ends and body begins at this point.
+    static let bodyStart: Double = 1.2
+    /// Body ends and outro transition begins at this point.
+    static let bodyEnd: Double = 18.0
+    /// Outro transition ends and universal rest begins at this point.
+    static let outroRestStart: Double = 18.8
+    /// Body phase duration — the window in which the pet plays its activity
+    /// and (for walking scripts) completes a full round trip home→edge→home.
+    static let bodyDuration: Double = bodyEnd - bodyStart  // 16.8
 
     /// Returns the script active at the given date. Uses a seeded shuffle
     /// per 200-second "round" so each round plays every script exactly
@@ -871,11 +922,11 @@ struct Pet: View {
         return (step % 2 == 0) ? .idleBoxA : .idleBoxB
     }
 
-    /// Classic wave — the friendly "hi there" beat that was the original
-    /// idle. Kept as one script of five so it doesn't saturate the loop.
-    private func waveScript(at t: Double, cycle: Double) -> PetPose {
-        if cycle < 1.5 {
-            if cycle < 0.18 || cycle >= 1.32 { return .idleWavePrep }
+    /// Classic wave — fast waving in the first beat of the body, then a
+    /// stretch mid-body. Universal intro/outro already handles the
+    /// idleWavePrep "arm rising / lowering" bridge.
+    private func waveScript(at t: Double, bodyT: Double) -> PetPose {
+        if bodyT < 1.5 {
             let step = Int(t * 7.0)
             switch step % 3 {
             case 0:  return .idleWaveA
@@ -883,51 +934,51 @@ struct Pet: View {
             default: return .idleWaveB
             }
         }
-        if cycle >= 4.0 && cycle < 4.8 { return .idleStretch }
+        if bodyT >= 3.5 && bodyT < 4.3 { return .idleStretch }
         return .idle
     }
 
     /// Stretch-focused — a big waking stretch with a secondary mini-hop.
     /// Pet looks "alive and limber" across the window.
-    private func stretchScript(cycle: Double) -> PetPose {
-        if cycle >= 0.5 && cycle < 2.0  { return .idleStretch }
-        if cycle >= 4.0 && cycle < 4.6  { return .idleLookR }
-        if cycle >= 6.0 && cycle < 7.5  { return .idleStretch }
-        if cycle >= 11.0 && cycle < 12.0 { return .idleScratch }
+    private func stretchScript(bodyT: Double) -> PetPose {
+        if bodyT >= 0.0 && bodyT < 1.5  { return .idleStretch }
+        if bodyT >= 3.5 && bodyT < 4.1  { return .idleLookR }
+        if bodyT >= 5.5 && bodyT < 7.0  { return .idleStretch }
+        if bodyT >= 10.5 && bodyT < 11.5 { return .idleScratch }
         return .idle
     }
 
     /// Drowsy — yawn, sit briefly, yawn again. Gives the pet an "after
     /// lunch" rhythm without tipping into full sleep.
-    private func drowsyScript(cycle: Double) -> PetPose {
-        if cycle >= 1.0 && cycle < 2.2  { return .idleYawn }
-        if cycle >= 3.5 && cycle < 6.5  { return .idleSit }
-        if cycle >= 8.0 && cycle < 9.0  { return .idleYawn }
-        if cycle >= 11.0 && cycle < 12.0 { return .idleStretch }
+    private func drowsyScript(bodyT: Double) -> PetPose {
+        if bodyT >= 0.5 && bodyT < 1.7  { return .idleYawn }
+        if bodyT >= 3.0 && bodyT < 6.0  { return .idleSit }
+        if bodyT >= 7.5 && bodyT < 8.5  { return .idleYawn }
+        if bodyT >= 10.5 && bodyT < 11.5 { return .idleStretch }
         return .idle
     }
 
     /// Curious — scratch head, look around. Pet reads as pensive, weighing
     /// options. Good complement to the typing state's thought bubble.
-    private func curiousScript(cycle: Double) -> PetPose {
-        if cycle >= 0.5 && cycle < 2.0  { return .idleScratch }
-        if cycle >= 3.0 && cycle < 3.6  { return .idleLookL }
-        if cycle >= 5.0 && cycle < 5.6  { return .idleLookR }
-        if cycle >= 7.0 && cycle < 8.5  { return .idleScratch }
-        if cycle >= 11.0 && cycle < 11.6 { return .idleLookL }
+    private func curiousScript(bodyT: Double) -> PetPose {
+        if bodyT >= 0.0 && bodyT < 1.5  { return .idleScratch }
+        if bodyT >= 2.5 && bodyT < 3.1  { return .idleLookL }
+        if bodyT >= 4.5 && bodyT < 5.1  { return .idleLookR }
+        if bodyT >= 6.5 && bodyT < 8.0  { return .idleScratch }
+        if bodyT >= 10.5 && bodyT < 11.1 { return .idleLookL }
         return .idle
     }
 
     /// Dance — tiny sidestep feel via alternating look-direction + stretch.
     /// Actual horizontal motion is layered in `resolveBounce` as a small
     /// side-to-side sway during this script.
-    private func danceScript(cycle: Double) -> PetPose {
-        if cycle >= 0.5 && cycle < 1.5  { return .idleStretch }
-        if cycle >= 2.0 && cycle < 2.4  { return .idleLookL }
-        if cycle >= 2.8 && cycle < 3.2  { return .idleLookR }
-        if cycle >= 3.6 && cycle < 4.0  { return .idleLookL }
-        if cycle >= 5.0 && cycle < 6.0  { return .idleStretch }
-        if cycle >= 7.5 && cycle < 8.5  { return .idleScratch }
+    private func danceScript(bodyT: Double) -> PetPose {
+        if bodyT >= 0.0 && bodyT < 1.0  { return .idleStretch }
+        if bodyT >= 1.5 && bodyT < 1.9  { return .idleLookL }
+        if bodyT >= 2.3 && bodyT < 2.7  { return .idleLookR }
+        if bodyT >= 3.1 && bodyT < 3.5  { return .idleLookL }
+        if bodyT >= 4.5 && bodyT < 5.5  { return .idleStretch }
+        if bodyT >= 7.0 && bodyT < 8.0  { return .idleScratch }
         return .idle
     }
 
@@ -979,35 +1030,42 @@ struct Pet: View {
         // pet to the pill's leading edge so it's never hidden by the
         // hardware-notch cutout in the middle of the closed pill.
         if isStationaryScript(at: date) { return (0, true) }
-        let half = Double(walkRange) / Double(walkSpeed)  // one-way walk duration
-        let dwell = max(0, edgeDwell)
-        let cycle = 2 * half + 2 * dwell                  // walk→dwell→walk→dwell
-        // Cycle time is relative to walkStart (the moment the pet
-        // entered walking mode) so every idle entry begins at phase A:
-        // x=0, facing right. Absolute Date.now was the old behavior
-        // and caused the teleport-on-entry bug.
-        let raw = max(0, date.timeIntervalSince(walkStart))
-        // Settle phase — stand still at home for a beat before walking.
-        if raw < settlePause { return (0, true) }
-        let elapsed = raw - settlePause
-        let t = elapsed.truncatingRemainder(dividingBy: cycle)
 
-        // Phase A: walking right (0 → walkRange)
-        if t < half {
-            let p = CGFloat(t / half)
+        // Idle-entry settle — pet stays at home while the pack-up beat
+        // + fade-in play, before traversal kicks off.
+        let fromEntry = max(0, date.timeIntervalSince(walkStart))
+        if fromEntry < settlePause { return (0, true) }
+
+        // Pinning pet to x=0 during intro + outro phases guarantees every
+        // script boundary finds the pet at home — walking↔stationary
+        // transitions no longer teleport.
+        let t = date.timeIntervalSinceReferenceDate
+        let inScript = t.truncatingRemainder(dividingBy: Self.scriptWindow)
+        if inScript < Self.bodyStart  { return (0, true) }
+        if inScript >= Self.bodyEnd   { return (0, true) }
+
+        // half is clamped so the round trip always ends ≥0.5s before the
+        // outro boundary — on wide-pill displays the nominal walkSpeed
+        // wouldn't reach home in time and the outro pin would teleport.
+        let bodyT = inScript - Self.bodyStart
+        let dwell = max(0, edgeDwell)
+        let homeRestBuffer: Double = 0.5
+        let maxRoundTrip = Self.bodyDuration - homeRestBuffer
+        let maxHalf = max(0.5, (maxRoundTrip - dwell) / 2)
+        let requestedHalf = Double(walkRange) / Double(walkSpeed)
+        let half = min(requestedHalf, maxHalf)
+        let roundTrip = 2 * half + dwell
+        if bodyT >= roundTrip { return (0, true) }
+
+        if bodyT < half {
+            let p = CGFloat(bodyT / half)
             return (walkRange * p, true)
         }
-        // Phase B: dwelling at right edge (still facing right)
-        if t < half + dwell {
+        if bodyT < half + dwell {
             return (walkRange, true)
         }
-        // Phase C: walking left (walkRange → 0)
-        if t < 2 * half + dwell {
-            let p = CGFloat((t - half - dwell) / half)
-            return (walkRange * (1 - p), false)
-        }
-        // Phase D: dwelling at left edge
-        return (0, false)
+        let p = CGFloat((bodyT - half - dwell) / half)
+        return (walkRange * (1 - p), false)
     }
 }
 

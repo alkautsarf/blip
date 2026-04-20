@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-20
+
+### Changed
+
+- Phase-based idle choreography — each 20s script window now runs through `[0, 0.4)` universal rest → `[0.4, 1.2)` script-specific intro bridge → `[1.2, 18.0)` body → `[18.0, 18.8)` outro bridge → `[18.8, 20)` universal rest. Every script boundary lands with the pet at `.idle` pose, x=0, so walking↔stationary transitions no longer teleport (e.g. skate → meditate now reads as "rolling → hops off board → stands → sits down → lotus")
+- Per-script intro/outro bridge poses — encoded as an `IdleScript.bridges` property (mirrors the `isStationary` pattern) so pose mapping is colocated with each case: wave↔idleWavePrep, skate ends in idleSit (hops off), headphone ends in idleScratch (removes earcups), meditate wraps idleSit (sits down / stands up), etc.
+- Walk traversal synced to the script window — every walking script completes one home→edge→home round trip within the 16.8s body phase, then rests at home until outro. `walkSpeed` default 30 → 45 and `edgeDwell` 3.5 → 2.0 so the round trip fits comfortably
+- Walk speed auto-clamps up on wide-pill displays so the round trip always ends ≥0.5s before the outro boundary — prevents the teleport that would otherwise occur if the pet was mid-walk when the outro pinned it home
+- Pack-up beat extended to cover the full settle window — pet holds `idleSit` for 0.7s then `idle` for the remainder, keeping pose in sync with the x=0 position pin during settle so mid-script activity frames don't show while the pet is stuck at home
+- Shared blink/look micro-beats now fire only for walking scripts — stationary scripts (meditate, workout, boxing) skip them so the trance isn't broken by an errant blink
+
 ## [0.3.0] - 2026-04-20
 
 ### Added
@@ -106,6 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.3.1]: https://github.com/alkautsarf/blip/releases/tag/v0.3.1
 [0.3.0]: https://github.com/alkautsarf/blip/releases/tag/v0.3.0
 [0.2.0]: https://github.com/alkautsarf/blip/releases/tag/v0.2.0
 [0.1.1]: https://github.com/alkautsarf/blip/releases/tag/v0.1.1
