@@ -12,16 +12,31 @@
 //   z = sleep mark (orange faded)
 //   o = thought-bubble dot (small orange circle, sub-cell)
 //   ? = question mark accent (orange, prominent 2-beat bubble)
+//   K = keyboard body (neutral gray — baked into typing frames so the pet's
+//       hand lands on a tangible object instead of floating in space)
+//   k = keyboard key dot (lighter gray, sub-cell dot — suggests keys)
 //   . = transparent
 //
-// Every state runs a 2+ frame cycle so the pet always has motion. Idle also
-// rotates through wave/blink/look-around across a 10s loop. Working rotates
-// typing + sip break + thought bubble. Celebrate cycles 4 victory poses.
+// Every state runs a 2+ frame cycle so the pet always has motion. Idle
+// rotates through a rich variety pool (wave, blink, look, stretch, yawn,
+// scratch, sit, jump) on a 20s outer loop so repetition never reads as
+// obvious. Working rotates typingA/B with the hand striking an integrated
+// keyboard, plus sip + thought micro-breaks. Celebrate cycles 4 victory poses.
 import SwiftUI
 
 enum PetPose: String, CaseIterable {
     case idle, idleBlink, idleWaveA, idleWaveB, idleWaveC, idleWavePrep
     case idleLookL, idleLookR
+    case idleStretch, idleYawn, idleScratch, idleSit
+    // Creative activity poses — picked up by their respective idle scripts
+    // (skateScript, headphoneScript, workoutScript, meditateScript,
+    // boxingScript). All 10 live alongside the original 5 scripts on
+    // the 20s outer rotation.
+    case idleSkateA, idleSkateB
+    case idleHeadphoneA, idleHeadphoneB
+    case idleCurlDown, idleCurlUp
+    case idleMeditateA, idleMeditateB
+    case idleBoxA, idleBoxB
     case typingA, typingB, typingSip, typingThink
     case thinkA, thinkB
     case sleepA, sleepB
@@ -139,33 +154,213 @@ enum PetFrames {
         "..BB....BS..",
     ])
 
-    // Typing frame A — right-facing profile, sitting pose (legs tucked).
-    // Only right arm extended forward on the keyboard (row 4).
+    // Stretch — arms extended up and out in a Y shape. Reads as a big
+    // waking-up stretch; pairs with a small bounce from resolveBounce.
+    static let idleStretch = PetFrame(rows: [
+        ".B.......B..",
+        "..B.....B...",
+        "..BBBBBBBS..",
+        "..BEBBBBES..",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+        "..BB....BS..",
+    ])
+
+    // Yawn — eyes closed (c) plus a drifting z above to signal drowsiness.
+    // No mouth in the 12-col grid (head is only 2 rows); z carries it.
+    static let idleYawn = PetFrame(rows: [
+        "..........z.",
+        "..BBBBBBBS..",
+        "..BcBBBBcS..",
+        "BBBBBBBBBBBS",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+        "..BB....BS..",
+    ])
+
+    // Scratch head — left arm bent up over the head (hand at col 1 row 0,
+    // arm bridge through col 1 rows 1-2). The right arm still extends
+    // horizontally so the silhouette doesn't read as stuck.
+    static let idleScratch = PetFrame(rows: [
+        ".B..........",
+        ".BBBBBBBBS..",
+        "..BEBBBBES..",
+        ".BBBBBBBBBBS",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+        "..BB....BS..",
+    ])
+
+    // Sit — compact crouch. Body holds its full width but arms tuck in
+    // (no horizontal row-3 extension) and legs fold, leaving two small
+    // feet-dots. Reads as "settled down for a moment".
+    static let idleSit = PetFrame(rows: [
+        "............",
+        "............",
+        "..BBBBBBBS..",
+        "..BEBBBBES..",
+        ".BBBBBBBBBS.",
+        ".BBBBBBBBBS.",
+        "..BBBBBBBS..",
+        "...BB..BB...",
+    ])
+
+    // MARK: - Creative activity frames
+
+    // Skateboarding — pet on a skateboard (W = wood deck, w = wheel).
+    // Arms swing for balance; board + wheels planted beneath. Alternates
+    // arm position left↔right between A/B so the pet reads as "cruising".
+    static let idleSkateA = PetFrame(rows: [
+        "............",
+        "BBBBBBBBBBBS",
+        "..BEBBBBES..",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+        ".WWWWWWWWWW.",
+        "..w......w..",
+    ])
+    static let idleSkateB = PetFrame(rows: [
+        "............",
+        "..BBBBBBBS..",
+        "..BEBBBBES..",
+        "BBBBBBBBBBBS",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+        ".WWWWWWWWWW.",
+        "..w......w..",
+    ])
+
+    // Headphones walk — H marks the earcups flanking the head. Alternates
+    // eyes-open / eyes-closed to simulate head bopping to the beat.
+    static let idleHeadphoneA = PetFrame(rows: [
+        "............",
+        "HHBBBBBBBHH.",
+        "HHBEBBBBEHH.",
+        "BBBBBBBBBBBS",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+        "..BB....BS..",
+    ])
+    static let idleHeadphoneB = PetFrame(rows: [
+        "HHBBBBBBBHH.",
+        "HHBcBBBBcHH.",
+        "BBBBBBBBBBBS",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+        "..BB....BS..",
+    ])
+
+    // Workout — dumbbell bicep curl. Down: arms extended outward with
+    // weights at the ends. Up: arms folded, weights at shoulders.
+    // Alternates at a slower cadence (2 Hz) for realistic rep pacing.
+    static let idleCurlDown = PetFrame(rows: [
+        "............",
+        "..BBBBBBBS..",
+        "..BEBBBBES..",
+        "..BBBBBBBS..",
+        "DBBBBBBBBSD.",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+    ])
+    static let idleCurlUp = PetFrame(rows: [
+        "..D.....D...",
+        "..B.....B...",
+        "..BBBBBBBS..",
+        "..BEBBBBES..",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+    ])
+
+    // Meditation — lotus pose with the ohm drifting upward between
+    // frames. Eyes closed throughout; body shifts 1 row for a breath.
+    static let idleMeditateA = PetFrame(rows: [
+        "............",
+        ".....o......",
+        "..BBBBBBBS..",
+        "..BcBBBBcS..",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "BBBBBBBBBBBB",
+        "............",
+    ])
+    static let idleMeditateB = PetFrame(rows: [
+        ".......o....",
+        "............",
+        "..BBBBBBBS..",
+        "..BcBBBBcS..",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "BBBBBBBBBBBB",
+        "............",
+    ])
+
+    // Boxing — alternating left/right jabs. Each frame extends one arm
+    // horizontally across the full width while the other tucks against
+    // the body as a guard.
+    static let idleBoxA = PetFrame(rows: [
+        "............",
+        "..BBBBBBBS..",
+        "..BEBBBBES..",
+        "BBBBBBBBBS..",
+        "..BBBBBBBSBB",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+        "..BB....BS..",
+    ])
+    static let idleBoxB = PetFrame(rows: [
+        "............",
+        "..BBBBBBBS..",
+        "..BEBBBBES..",
+        "..BBBBBBBBBB",
+        "BBBBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BB....BS..",
+        "..BB....BS..",
+    ])
+
+    // Typing frame A — UPPER arm strikes (row 4 extended onto the keys),
+    // LOWER arm is lifted mid-tap (tip retracted to col 10 row 5, just
+    // off the keyboard). Alternates with B below so one hand is always
+    // down while the other is up — the rhythm the user associates with
+    // real two-finger typing.
     static let typingA = PetFrame(rows: [
         "............",
         "..BBBBBBBS..",
         "..BBBBEBES..",
         "..BBBBBBBS..",
         "..BBBBBBBBBS",
-        "..BBBBBBBS..",
+        "..BBBBBBBSB.",
         "..BBBBBBBS..",
         "...BB..BB...",
     ])
 
-    // Typing frame B — same sitting profile, arm raised one row (mid-tap).
+    // Typing frame B — UPPER arm is now LIFTED (tip up at col 10 row 2,
+    // above the shoulder), LOWER arm strikes (row 6 extended onto the
+    // keys). Inverse of A — hands swap every beat.
     static let typingB = PetFrame(rows: [
         "............",
         "..BBBBBBBS..",
-        "..BBBBEBES..",
+        "..BBBBEBESB.",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
         "..BBBBBBBBBS",
-        "..BBBBBBBS..",
-        "..BBBBBBBS..",
-        "..BBBBBBBS..",
         "...BB..BB...",
     ])
 
-    // Typing → sip break. Arm withdraws from keyboard, bends up so the hand
-    // reaches face level (col 11 row 2). Reads as "paused to drink".
+    // Typing → sip break. Upper arm curls up to face level holding a
+    // cup (col 11 row 2); lower arm stays resting on the keyboard so
+    // the pet reads as "paused mid-type to drink", not "walked away".
     static let typingSip = PetFrame(rows: [
         "............",
         "..BBBBBBBS..",
@@ -173,19 +368,20 @@ enum PetFrames {
         "..BBBBBBBSB.",
         "..BBBBBBBS..",
         "..BBBBBBBS..",
-        "..BBBBBBBS..",
+        "..BBBBBBBBBS",
         "...BB..BB...",
     ])
 
-    // Typing + thought bubble. Same base typing pose as typingA but with a
-    // single "o" drifting above the head to signal active thinking.
+    // Typing + thought bubble. Same alternating pose as A (upper down,
+    // lower up) with a drifting "o" bubble above the head to signal
+    // active reasoning while typing.
     static let typingThink = PetFrame(rows: [
         "..........o.",
         "..BBBBBBBS..",
         "..BBBBEBES..",
         "..BBBBBBBS..",
         "..BBBBBBBBBS",
-        "..BBBBBBBS..",
+        "..BBBBBBBSB.",
         "..BBBBBBBS..",
         "...BB..BB...",
     ])
@@ -319,15 +515,29 @@ enum PetFrames {
 
     static func frame(for pose: PetPose) -> PetFrame {
         switch pose {
-        case .idle:         return idle
-        case .idleBlink:    return idleBlink
-        case .idleWaveA:    return idleWaveA
-        case .idleWaveB:    return idleWaveB
-        case .idleWaveC:    return idleWaveC
-        case .idleWavePrep: return idleWavePrep
-        case .idleLookL:    return idleLookL
-        case .idleLookR:    return idleLookR
-        case .typingA:      return typingA
+        case .idle:            return idle
+        case .idleBlink:       return idleBlink
+        case .idleWaveA:       return idleWaveA
+        case .idleWaveB:       return idleWaveB
+        case .idleWaveC:       return idleWaveC
+        case .idleWavePrep:    return idleWavePrep
+        case .idleLookL:       return idleLookL
+        case .idleLookR:       return idleLookR
+        case .idleStretch:     return idleStretch
+        case .idleYawn:        return idleYawn
+        case .idleScratch:     return idleScratch
+        case .idleSit:         return idleSit
+        case .idleSkateA:      return idleSkateA
+        case .idleSkateB:      return idleSkateB
+        case .idleHeadphoneA:  return idleHeadphoneA
+        case .idleHeadphoneB:  return idleHeadphoneB
+        case .idleCurlDown:    return idleCurlDown
+        case .idleCurlUp:      return idleCurlUp
+        case .idleMeditateA:   return idleMeditateA
+        case .idleMeditateB:   return idleMeditateB
+        case .idleBoxA:        return idleBoxA
+        case .idleBoxB:        return idleBoxB
+        case .typingA:         return typingA
         case .typingB:      return typingB
         case .typingSip:    return typingSip
         case .typingThink:  return typingThink
@@ -353,6 +563,11 @@ struct Pet: View {
     /// the user always sees activity when Claude is working — even while
     /// reading a finished session's preview.
     var anySessionWorking: Bool = false
+    /// Timestamp of the most recent "typing ended" transition. When
+    /// non-nil and recent (< ~0.8s ago), the pet holds a compact
+    /// pack-up pose (idleSit) before relaxing into the full idle rest.
+    /// Reads as "pet closing laptop / tucking arms in" → standing.
+    var workingStoppedAt: Date? = nil
     /// Width of the critter sprite itself; height derives from 12:8 aspect.
     var width: CGFloat = 28
     /// Horizontal traversal range (pt). Pet oscillates between x=0 and x=walkRange
@@ -383,6 +598,19 @@ struct Pet: View {
         }
     }
 
+    /// Timestamp at which the current walking cycle started. Reset every
+    /// time `walkRange` transitions from 0 to non-zero so the pet always
+    /// begins a fresh idle stint at phase A (walking right from home).
+    /// Without this the cycle would key off absolute Date.now and the
+    /// pet would "teleport" to wherever the cycle happens to be at the
+    /// transition moment — mid-walk, dwell-at-right-edge, whatever.
+    @State private var walkStart: Date = Date()
+    @State private var lastWalkRange: CGFloat = 0
+    /// Fades in from 0 to 1 over ~0.35s when walking resumes. Masks
+    /// any residual first-frame jitter and gives the idle-entry a
+    /// soft "here I am" beat instead of a hard pop.
+    @State private var entryOpacity: Double = 1.0
+
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / walkFPS, paused: !shouldAnimate)) { ctx in
             let pose = resolvePose(at: ctx.date)
@@ -393,11 +621,38 @@ struct Pet: View {
                 .frame(width: width, height: boxHeight)
                 .scaleEffect(x: facingRight ? 1 : -1, y: 1, anchor: .center)
                 .offset(x: walkX, y: bounceY)
+                .opacity(entryOpacity)
         }
         // Outer frame reserves width + walkRange so the traversing pet doesn't
         // overflow and overlap its HStack neighbors. Leading alignment keeps
         // x=0 at the left edge of the reserved band.
         .frame(width: width + walkRange, height: boxHeight, alignment: .leading)
+        .onAppear {
+            lastWalkRange = walkRange
+            walkStart = Date()
+            // Pet appearing fresh with walkRange already > 0 means we're
+            // on the opened→closed header transition — the MGE would
+            // animate the pet across ~290pt from opened-pill-leading to
+            // closed-pill-leading (visually "sliding in from outside"
+            // the closed pill's bounds). Hide until that motion settles.
+            if walkRange > 0 { fadeInEntry() }
+        }
+        .onChange(of: walkRange) { _, newRange in
+            if lastWalkRange == 0 && newRange > 0 {
+                walkStart = Date()
+                fadeInEntry()
+            }
+            lastWalkRange = newRange
+        }
+    }
+
+    /// Hide the pet immediately (opacity 0), then fade in after a short
+    /// delay so any layout/MGE transition can complete offscreen first.
+    private func fadeInEntry() {
+        entryOpacity = 0
+        withAnimation(.easeInOut(duration: 0.55).delay(0.35)) {
+            entryOpacity = 1
+        }
     }
 
     private var shouldAnimate: Bool {
@@ -430,6 +685,13 @@ struct Pet: View {
             let step = Int(t * 0.35)
             return (step % 2 == 0) ? .sleepA : .sleepB
         case .idle, .preview, .expand:
+            // "Pack up" beat — pet holds a compact crouch for 0.7s after
+            // typing just ended, reading as "pulling arms in to close
+            // the laptop" before extending into the full idle rest.
+            if let stoppedAt = workingStoppedAt,
+               date.timeIntervalSince(stoppedAt) < 0.7 {
+                return .idleSit
+            }
             return resolveIdlePose(at: date)
         case .working:
             // 10s typing loop with micro-breaks:
@@ -453,24 +715,167 @@ struct Pet: View {
         }
     }
 
-    /// Idle state runs on a 10s loop with staggered micro-beats so the pet
-    /// always has something going on:
-    ///   0.00–0.18s:  wave prep  (arm raises to shoulder level)
-    ///   0.18–1.32s:  wave burst (A/C/B 3-beat rotation at 7 Hz — fast flicks)
-    ///   1.32–1.50s:  wave prep  (arm lowers back down)
-    ///   3.00–3.60s:  look left
-    ///   5.00–5.60s:  look right
-    ///   7.00–7.15s:  blink
-    ///   every 7s:    parabolic jump (handled in resolveBounce)
-    ///   otherwise:   rest pose
+    /// Idle rotates through a variety pool on a 20s outer cycle so the loop
+    /// never feels obvious. Each 20s period picks a sequence from a set of
+    /// "scripts" (wave-heavy, stretch-heavy, drowsy, curious, dance) — the
+    /// selection is deterministic from the cycle index so the pet can't
+    /// mid-sequence glitch, but the overall effect is varied.
+    ///
+    /// Micro-beats within each 20s window are keyed off fractional cycle
+    /// time. Between beats the pet falls back to `.idle` (rest pose).
+    /// Jumps and body bobs are handled separately in `resolveBounce`.
     private func resolveIdlePose(at date: Date) -> PetPose {
         let t = date.timeIntervalSinceReferenceDate
-        let cycle = t.truncatingRemainder(dividingBy: 10.0)
+        let cycle = t.truncatingRemainder(dividingBy: Self.scriptWindow)
+
+        // Blink + look happen in every script for micro-liveness.
+        if cycle >= 18.2 && cycle < 18.35 { return .idleBlink }
+        if cycle >= 9.0  && cycle < 9.15  { return .idleBlink }
+        if cycle >= 13.0 && cycle < 13.6  { return .idleLookL }
+        if cycle >= 15.0 && cycle < 15.6  { return .idleLookR }
+
+        // Script rotation — shuffled-deck: every 200s "round" plays all
+        // 10 scripts in a random order, then reshuffles.
+        switch Self.currentScript(at: date) {
+        case .wave:       return waveScript(at: t, cycle: cycle)
+        case .stretch:    return stretchScript(cycle: cycle)
+        case .drowsy:     return drowsyScript(cycle: cycle)
+        case .curious:    return curiousScript(cycle: cycle)
+        case .dance:      return danceScript(cycle: cycle)
+        case .skate:      return skateScript(at: t)
+        case .headphone:  return headphoneScript(at: t)
+        case .workout:    return workoutScript(at: t)
+        case .meditate:   return meditateScript(at: t)
+        case .boxing:     return boxingScript(at: t)
+        }
+    }
+
+    /// True when the current script pins the pet at the pill's leading
+    /// edge (safely outside the hardware-notch cutout) instead of walking.
+    private func isStationaryScript(at date: Date) -> Bool {
+        Self.currentScript(at: date).isStationary
+    }
+
+    /// The 10 idle scripts in the rotation. Enum (not raw int) so the
+    /// stationary check can't drift if the switch-case ordering ever
+    /// changes — stationary status lives on the case itself.
+    enum IdleScript: Int, CaseIterable {
+        case wave, stretch, drowsy, curious, dance
+        case skate, headphone, workout, meditate, boxing
+
+        /// True when the pet stays pinned to the pill's leading edge
+        /// (no walking) — so it's never hidden behind the hardware-notch
+        /// cutout in the middle of the closed pill.
+        var isStationary: Bool {
+            switch self {
+            case .workout, .meditate, .boxing: return true
+            default: return false
+            }
+        }
+    }
+
+    /// Duration (seconds) of a single script window.
+    static let scriptWindow: Double = 20.0
+
+    /// Returns the script active at the given date. Uses a seeded shuffle
+    /// per 200-second "round" so each round plays every script exactly
+    /// once in a different order. Anti-repeat swap ensures the last
+    /// script of one round isn't the first of the next.
+    static func currentScript(at date: Date) -> IdleScript {
+        let t = date.timeIntervalSinceReferenceDate
+        let cycleIndex = Int(t / scriptWindow)
+        let round = cycleIndex / IdleScript.allCases.count
+        let pos = cycleIndex % IdleScript.allCases.count
+        return IdleScript(rawValue: cachedDeck(seed: round)[pos]) ?? .wave
+    }
+
+    /// Single-slot cache for the most recently requested round's deck.
+    /// `currentScript` is called on every TimelineView tick (~6 Hz) but
+    /// `round` only changes every 200s, so the cache hit rate is ~99.9%.
+    /// Holds the previous round's deck too so the anti-repeat check in
+    /// `shuffledDeck` doesn't re-shuffle prev on each miss.
+    private static var deckCache: (round: Int, deck: [Int], prev: [Int])? = nil
+
+    private static func cachedDeck(seed: Int) -> [Int] {
+        if let c = deckCache, c.round == seed { return c.deck }
+        let prev = deckCache?.round == seed - 1 ? deckCache!.deck : rawDeck(seed: seed - 1)
+        var deck = rawDeck(seed: seed)
+        if seed > 0, let prevLast = prev.last, deck[0] == prevLast {
+            deck.swapAt(0, 1)
+        }
+        deckCache = (round: seed, deck: deck, prev: prev)
+        return deck
+    }
+
+    /// Deterministic Fisher-Yates shuffle of [0..<scriptCount] seeded
+    /// by `seed`. Called at most twice per 200s thanks to `deckCache`.
+    private static func rawDeck(seed: Int) -> [Int] {
+        var rng = SeededRNG(seed: UInt64(bitPattern: Int64(seed)))
+        var deck = Array(0..<IdleScript.allCases.count)
+        deck.shuffle(using: &rng)
+        return deck
+    }
+
+    /// Simple seeded RNG (xorshift64 with SplitMix-style seed diffusion).
+    /// Sequential seeds produce well-distributed independent sequences.
+    private struct SeededRNG: RandomNumberGenerator {
+        var state: UInt64
+        init(seed: UInt64) {
+            // Diffuse so seed 0, 1, 2, … produce uncorrelated sequences.
+            var s = (seed &+ 1) &* 0x9E3779B97F4A7C15
+            s ^= (s >> 30)
+            s &*= 0xBF58476D1CE4E5B9
+            s ^= (s >> 27)
+            self.state = s == 0 ? 0xDEADBEEF_CAFEBABE : s
+        }
+        mutating func next() -> UInt64 {
+            state ^= state << 13
+            state ^= state >> 7
+            state ^= state << 17
+            return state
+        }
+    }
+
+    /// Skateboard — both frames at 6 Hz. No shared micro-beats (breaks
+    /// the rolling momentum); pet rides continuously for the full 20s.
+    private func skateScript(at t: Double) -> PetPose {
+        let step = Int(t * 6.0)
+        return (step % 2 == 0) ? .idleSkateA : .idleSkateB
+    }
+
+    /// Headphones walk — head bops between eyes-open and eyes-closed
+    /// at 6 Hz. Pet traverses normally while the poses cycle.
+    private func headphoneScript(at t: Double) -> PetPose {
+        let step = Int(t * 6.0)
+        return (step % 2 == 0) ? .idleHeadphoneA : .idleHeadphoneB
+    }
+
+    /// Workout — slow bicep curl cadence (2 Hz ≈ one rep per 0.5s) so
+    /// the lift reads as intentional effort, not a twitch.
+    private func workoutScript(at t: Double) -> PetPose {
+        let step = Int(t * 2.0)
+        return (step % 2 == 0) ? .idleCurlDown : .idleCurlUp
+    }
+
+    /// Meditation — extremely slow breath pulse (0.4 Hz ≈ 2.5s per
+    /// inhale/exhale cycle). Ohm drifts between frames.
+    private func meditateScript(at t: Double) -> PetPose {
+        let step = Int(t * 0.4)
+        return (step % 2 == 0) ? .idleMeditateA : .idleMeditateB
+    }
+
+    /// Boxing — 3 Hz jab cadence (left/right alternating), brisk enough
+    /// to read as combat rhythm without strobing.
+    private func boxingScript(at t: Double) -> PetPose {
+        let step = Int(t * 3.0)
+        return (step % 2 == 0) ? .idleBoxA : .idleBoxB
+    }
+
+    /// Classic wave — the friendly "hi there" beat that was the original
+    /// idle. Kept as one script of five so it doesn't saturate the loop.
+    private func waveScript(at t: Double, cycle: Double) -> PetPose {
         if cycle < 1.5 {
-            // Prep brackets the fast wave to avoid snap-in / snap-out.
             if cycle < 0.18 || cycle >= 1.32 { return .idleWavePrep }
-            // 7 Hz 3-beat rotation (A → C → B → A …) — C is the mid-shake
-            // flourish, so the rhythm feels less metronomic than pure A/B.
             let step = Int(t * 7.0)
             switch step % 3 {
             case 0:  return .idleWaveA
@@ -478,9 +883,51 @@ struct Pet: View {
             default: return .idleWaveB
             }
         }
+        if cycle >= 4.0 && cycle < 4.8 { return .idleStretch }
+        return .idle
+    }
+
+    /// Stretch-focused — a big waking stretch with a secondary mini-hop.
+    /// Pet looks "alive and limber" across the window.
+    private func stretchScript(cycle: Double) -> PetPose {
+        if cycle >= 0.5 && cycle < 2.0  { return .idleStretch }
+        if cycle >= 4.0 && cycle < 4.6  { return .idleLookR }
+        if cycle >= 6.0 && cycle < 7.5  { return .idleStretch }
+        if cycle >= 11.0 && cycle < 12.0 { return .idleScratch }
+        return .idle
+    }
+
+    /// Drowsy — yawn, sit briefly, yawn again. Gives the pet an "after
+    /// lunch" rhythm without tipping into full sleep.
+    private func drowsyScript(cycle: Double) -> PetPose {
+        if cycle >= 1.0 && cycle < 2.2  { return .idleYawn }
+        if cycle >= 3.5 && cycle < 6.5  { return .idleSit }
+        if cycle >= 8.0 && cycle < 9.0  { return .idleYawn }
+        if cycle >= 11.0 && cycle < 12.0 { return .idleStretch }
+        return .idle
+    }
+
+    /// Curious — scratch head, look around. Pet reads as pensive, weighing
+    /// options. Good complement to the typing state's thought bubble.
+    private func curiousScript(cycle: Double) -> PetPose {
+        if cycle >= 0.5 && cycle < 2.0  { return .idleScratch }
         if cycle >= 3.0 && cycle < 3.6  { return .idleLookL }
         if cycle >= 5.0 && cycle < 5.6  { return .idleLookR }
-        if cycle >= 7.0 && cycle < 7.15 { return .idleBlink }
+        if cycle >= 7.0 && cycle < 8.5  { return .idleScratch }
+        if cycle >= 11.0 && cycle < 11.6 { return .idleLookL }
+        return .idle
+    }
+
+    /// Dance — tiny sidestep feel via alternating look-direction + stretch.
+    /// Actual horizontal motion is layered in `resolveBounce` as a small
+    /// side-to-side sway during this script.
+    private func danceScript(cycle: Double) -> PetPose {
+        if cycle >= 0.5 && cycle < 1.5  { return .idleStretch }
+        if cycle >= 2.0 && cycle < 2.4  { return .idleLookL }
+        if cycle >= 2.8 && cycle < 3.2  { return .idleLookR }
+        if cycle >= 3.6 && cycle < 4.0  { return .idleLookL }
+        if cycle >= 5.0 && cycle < 6.0  { return .idleStretch }
+        if cycle >= 7.5 && cycle < 8.5  { return .idleScratch }
         return .idle
     }
 
@@ -507,19 +954,43 @@ struct Pet: View {
         switch pose {
         case .idle, .idleBlink,
              .idleWaveA, .idleWaveB, .idleWaveC, .idleWavePrep,
-             .idleLookL, .idleLookR:
+             .idleLookL, .idleLookR,
+             .idleStretch, .idleYawn, .idleScratch, .idleSit,
+             .idleSkateA, .idleSkateB,
+             .idleHeadphoneA, .idleHeadphoneB,
+             .idleCurlDown, .idleCurlUp,
+             .idleMeditateA, .idleMeditateB,
+             .idleBoxA, .idleBoxB:
             return true
         default:
             return false
         }
     }
 
+    /// Seconds the pet stands still at home (x=0, facing right) right
+    /// after entering walking mode. Reads as "just stood up from the
+    /// keyboard" — gives the pose transition from typing→idle a natural
+    /// breathing beat instead of an immediate walk.
+    private var settlePause: Double { 1.5 }
+
     private func resolveTraversal(at date: Date) -> (x: CGFloat, facingRight: Bool) {
         guard isWalking else { return (0, true) }
+        // Stationary creative scripts (workout, meditate, boxing) pin the
+        // pet to the pill's leading edge so it's never hidden by the
+        // hardware-notch cutout in the middle of the closed pill.
+        if isStationaryScript(at: date) { return (0, true) }
         let half = Double(walkRange) / Double(walkSpeed)  // one-way walk duration
         let dwell = max(0, edgeDwell)
         let cycle = 2 * half + 2 * dwell                  // walk→dwell→walk→dwell
-        let t = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycle)
+        // Cycle time is relative to walkStart (the moment the pet
+        // entered walking mode) so every idle entry begins at phase A:
+        // x=0, facing right. Absolute Date.now was the old behavior
+        // and caused the teleport-on-entry bug.
+        let raw = max(0, date.timeIntervalSince(walkStart))
+        // Settle phase — stand still at home for a beat before walking.
+        if raw < settlePause { return (0, true) }
+        let elapsed = raw - settlePause
+        let t = elapsed.truncatingRemainder(dividingBy: cycle)
 
         // Phase A: walking right (0 → walkRange)
         if t < half {
@@ -584,6 +1055,30 @@ private struct PetFrameView: View {
                             cornerRadius: cell * 0.22
                         )
                         context.fill(path, with: .color(orange))
+                    case "k":
+                        // Keyboard key-dot highlight — gray cell base with a
+                        // brighter key-cap square inset. Signals "these are
+                        // keys" at the small notch render size.
+                        let keyboard = Color(white: 0.32)
+                        let cellRect = CGRect(x: x, y: y, width: cell, height: cell)
+                        context.fill(Path(cellRect), with: .color(keyboard))
+                        let pad = cell * 0.18
+                        let keyRect = CGRect(
+                            x: x + pad, y: y + pad,
+                            width: cell - 2 * pad, height: cell - 2 * pad
+                        )
+                        context.fill(Path(keyRect), with: .color(Color(white: 0.6)))
+                    case "w":
+                        // Skate wheel — small dark circle centered in the cell.
+                        let pad = cell * 0.08
+                        let wheelRect = CGRect(
+                            x: x + pad, y: y + pad,
+                            width: cell - 2 * pad, height: cell - 2 * pad
+                        )
+                        context.fill(
+                            Path(ellipseIn: wheelRect),
+                            with: .color(Color(white: 0.08))
+                        )
                     default:
                         if let color = fill(for: ch) {
                             let rect = CGRect(x: x, y: y, width: cell, height: cell)
@@ -604,6 +1099,10 @@ private struct PetFrameView: View {
         case "S":  return shadow
         case "E":  return Color.black
         case "z":  return orange.opacity(0.55)
+        case "K":  return Color(white: 0.32)
+        case "W":  return Color(red: 0.55, green: 0.44, blue: 0.28)  // skateboard wood
+        case "D":  return Color(white: 0.40)                          // dumbbell metal
+        case "H":  return Color(white: 0.10)                          // headphones
         default:   return nil
         }
     }

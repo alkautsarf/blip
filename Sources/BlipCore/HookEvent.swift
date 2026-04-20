@@ -101,13 +101,19 @@ public struct NotificationEvent: Codable, Sendable {
     public let sessionId: String
     public let cwd: String
     public let message: String
+    /// tmux pane id from `$TMUX_PANE`; nil outside tmux. Needed so the
+    /// app can drop the scan-placeholder entry for this pane instead
+    /// of leaving a duplicate row in the sessions overview.
+    public var tmuxPane: String?
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case cwd
         case message
+        case tmuxPane = "tmux_pane"
     }
-    public init(sessionId: String, cwd: String, message: String) {
+    public init(sessionId: String, cwd: String, message: String, tmuxPane: String? = nil) {
         self.sessionId = sessionId; self.cwd = cwd; self.message = message
+        self.tmuxPane = tmuxPane
     }
 }
 

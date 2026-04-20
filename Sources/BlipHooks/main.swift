@@ -197,11 +197,21 @@ struct BlipHooksCLI {
 
     // MARK: - ExitPlanMode (TUI-authoritative; notch just peeks a hint)
 
+    /// Reads `$TMUX_PANE` from the hook subprocess env (inherited from
+    /// the originating pane). Nil outside tmux or when the var is empty.
+    private static func currentTmuxPane() -> String? {
+        ProcessInfo.processInfo.environment["TMUX_PANE"].flatMap {
+            $0.isEmpty ? nil : $0
+        }
+    }
+
     private static func forwardPlanApprovalNotice(json: [String: Any]) {
+        let pane = currentTmuxPane()
         let notif = NotificationEvent(
             sessionId: (json["session_id"] as? String) ?? "",
             cwd: (json["cwd"] as? String) ?? "",
-            message: "Plan ready — approve in terminal"
+            message: "Plan ready — approve in terminal",
+            tmuxPane: pane
         )
         do {
             try BridgeClient.send(.event(.notification(notif)), to: SocketPath.resolved(), timeout: 1.0)
@@ -214,9 +224,7 @@ struct BlipHooksCLI {
     // MARK: - Heartbeat (pure liveness signal — no UI surface)
 
     private static func forwardHeartbeat(json: [String: Any]) {
-        let pane = ProcessInfo.processInfo.environment["TMUX_PANE"].flatMap {
-            $0.isEmpty ? nil : $0
-        }
+        let pane = currentTmuxPane()
         let beat = SessionHeartbeatEvent(
             sessionId: (json["session_id"] as? String) ?? "",
             cwd: (json["cwd"] as? String) ?? "",
@@ -253,12 +261,7 @@ struct BlipHooksCLI {
     // MARK: - Envelope construction (events only — commands built inline)
 
     private static func buildEventEnvelope(eventName: HookEventName, payload: Data) throws -> BridgeEnvelope {
-        // Captured once per hook run — the hook subprocess inherits the
-        // originating tmux pane's env from Claude Code. Empty string when
-        // the hook fires outside a tmux session.
-        let pane = ProcessInfo.processInfo.environment["TMUX_PANE"].flatMap {
-            $0.isEmpty ? nil : $0
-        }
+        let pane = currentTmuxPane()
         switch eventName {
         case .stop:
             var event = try JSONDecoder().decode(StopHookEvent.self, from: payload)
@@ -273,7 +276,9 @@ struct BlipHooksCLI {
             if event.tmuxPane == nil { event.tmuxPane = pane }
             return .event(.sessionStart(event))
         case .notification:
-            return .event(.notification(try JSONDecoder().decode(NotificationEvent.self, from: payload)))
+            var event = try JSONDecoder().decode(NotificationEvent.self, from: payload)
+            if event.tmuxPane == nil { event.tmuxPane = pane }
+            return .event(.notification(event))
         default:
             throw BridgeError.decodeFailed("event \(eventName.rawValue) not yet wired")
         }

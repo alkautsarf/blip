@@ -30,6 +30,12 @@ final class SessionRegistry: ObservableObject {
         var transcriptPath: String?
         var lastPing: Date
         var working: Bool        // true between UserPromptSubmit and Stop
+        /// Wall-clock of the most recent Stop hook for this session.
+        /// Used to gate the transcript-mtime fast path: if Stop is more
+        /// recent than the last transcript write, the session is done
+        /// and the fast path must not resurrect it as working. Nil
+        /// until the first Stop fires.
+        var lastStopAt: Date?
         /// Most recent tmux pane id the hook fired from (e.g. "%42").
         /// Used by focus-aware notch suppression — lets us compare
         /// against tmux's currently-active pane at notify time.
@@ -83,11 +89,41 @@ final class SessionRegistry: ObservableObject {
     static let stuckSessionCeiling: TimeInterval = 10 * 60  // 10 min
 
     /// Compose the canonical Claude Code transcript path for a session.
-    /// Mirrors Claude's on-disk layout: ~/.claude/projects/{cwd-encoded}/{sessionId}.jsonl
-    /// where cwd encoding replaces `/` with `-`.
+    /// Mirrors Claude's on-disk layout:
+    ///   ~/.claude/projects/{cwd-encoded}/{sessionId}.jsonl
+    /// where cwd encoding replaces BOTH `/` and `.` with `-`
+    /// (e.g. `/Users/foo/bar.baz` → `-Users-foo-bar-baz`).
+    /// Missing the dot substitution silently breaks mtime lookups for
+    /// any project whose path contains a dot.
     static func transcriptPath(sessionId: String, cwd: String) -> String {
-        let encoded = cwd.replacingOccurrences(of: "/", with: "-")
-        return NSHomeDirectory() + "/.claude/projects/" + encoded + "/" + sessionId + ".jsonl"
+        return NSHomeDirectory() + "/.claude/projects/" + encodeCwd(cwd) + "/" + sessionId + ".jsonl"
+    }
+
+    private static func encodeCwd(_ cwd: String) -> String {
+        cwd
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+    }
+
+    /// Find the most recently modified transcript (.jsonl) under the
+    /// project directory for `cwd`. Used to bootstrap a synthetic
+    /// tmux-pane entry's transcriptPath when blip starts mid-session
+    /// and missed the UserPromptSubmit that would have told us the
+    /// real session id. A best-guess is correct 99% of the time
+    /// (rare collision: two sessions in the same cwd writing at once).
+    static func latestTranscriptPath(forCwd cwd: String) -> String? {
+        let dir = NSHomeDirectory() + "/.claude/projects/" + encodeCwd(cwd)
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return nil }
+        var best: (path: String, mtime: Date)?
+        for f in files where f.hasSuffix(".jsonl") {
+            let full = dir + "/" + f
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: full),
+                  let mtime = attrs[.modificationDate] as? Date else { continue }
+            if best == nil || mtime > best!.mtime {
+                best = (full, mtime)
+            }
+        }
+        return best?.path
     }
 
     /// True when the claude CLI process behind this entry is alive.
@@ -107,17 +143,25 @@ final class SessionRegistry: ObservableObject {
         return attrs?[.modificationDate] as? Date
     }
 
-    /// Hook-authoritative working check. Hooks drive the `working`
-    /// flag (UserPromptSubmit + PreToolUse heartbeat flip it on,
-    /// Stop flips it off). This just exposes that flag with two
-    /// guards:
+    /// Hook-authoritative working check (pre-session logic restored).
+    /// Guards:
     ///   1. Process gone → not working (session is literally dead).
     ///   2. Stuck-session cap: user-cancel doesn't fire Stop, so
-    ///      `working=true` would be permanent otherwise. If the
-    ///      most recent activity (hook event OR transcript write)
-    ///      is older than 20 min, we declare the session stuck and
-    ///      flip to idle. Deep-thinking turns update one or the
-    ///      other well before this ceiling, so real work is safe.
+    ///      `working=true` would be permanent otherwise. If the most
+    ///      recent activity (hook event OR transcript write) is older
+    ///      than 10 min, we declare the session stuck and flip to idle.
+    ///      Deep-thinking turns update one or the other well before
+    ///      this ceiling, so real work is safe.
+    ///
+    /// Earlier experiments layered a transcript-mtime fast path on top
+    /// of this to catch sessions where blip started after UserPromptSubmit
+    /// had already fired. That path ALSO fired on post-Stop metadata
+    /// writes (Claude streams session summary + cumulative tokens into
+    /// the transcript right after Stop), so the pet "typed again" for
+    /// a beat after finishing. The fast path has been removed — hooks
+    /// alone are authoritative. The blip-restart-mid-session case will
+    /// show idle until the next UserPromptSubmit; that's an acceptable
+    /// tradeoff for never-false-typing.
     static func isActivelyWorking(_ entry: Entry, now: Date = Date()) -> Bool {
         if let pid = entry.pid, !isProcessAlive(pid) { return false }
         guard entry.working else { return false }
@@ -167,12 +211,20 @@ final class SessionRegistry: ObservableObject {
     /// Seed a placeholder entry for a tmux pane running Claude that
     /// hasn't fired any hooks yet (e.g. the app was restarted after
     /// the session was already open). Keyed by "tmux:%<paneId>" so
-    /// real events can replace it.
+    /// real events can replace it. transcriptPath is bootstrapped
+    /// from the cwd's newest .jsonl so `isActivelyWorking` can pick
+    /// up a silent session whose UserPromptSubmit we missed.
     func recordTmuxPane(paneId: String, pid: Int, cwd: String, at now: Date = Date()) {
         if let idx = entries.firstIndex(where: { $0.tmuxPane == paneId }) {
             // Already known — just keep pid fresh (claude could have
             // restarted inside the same pane with a different pid).
             entries[idx].pid = pid
+            // Bootstrap transcriptPath for pre-existing synthetics that
+            // didn't get one at creation time (handles the first reconcile
+            // after this code ships into a running blip).
+            if entries[idx].transcriptPath == nil {
+                entries[idx].transcriptPath = Self.latestTranscriptPath(forCwd: cwd)
+            }
             return
         }
         let id = "tmux:\(paneId)"
@@ -181,7 +233,7 @@ final class SessionRegistry: ObservableObject {
             cwd: cwd,
             sessionTag: Self.composeSessionTag(cwd: cwd),
             lastTurnText: "",
-            transcriptPath: nil,
+            transcriptPath: Self.latestTranscriptPath(forCwd: cwd),
             lastPing: now,
             working: false,
             tmuxPane: paneId,
@@ -287,6 +339,7 @@ final class SessionRegistry: ObservableObject {
             e.transcriptPath = transcriptPath
             e.lastTurnText = lastTurnText
             e.lastPing = now
+            e.lastStopAt = now
             if let tmuxPane { e.tmuxPane = tmuxPane }
 
             let newBucket = cumulativeOutputTokens / Self.milestoneStep

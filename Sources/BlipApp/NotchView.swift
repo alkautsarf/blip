@@ -147,11 +147,12 @@ struct NotchView: View {
     private var closedHeader: some View {
         ZStack {
             HStack(spacing: 6) {
-                HStack(alignment: .bottom, spacing: 0) {
+                HStack(alignment: .bottom, spacing: -6) {
                     Pet(
                         state: model.state,
                         isCelebrating: model.celebrating,
                         anySessionWorking: model.anySessionWorking,
+                        workingStoppedAt: model.workingStoppedAt,
                         width: 28,
                         walkRange: idlePetWalkRange,
                         walkSpeed: 32
@@ -159,11 +160,32 @@ struct NotchView: View {
                     // Only the visible header should claim isSource. When the
                     // pill opens, the opened-header pet becomes the source so
                     // SwiftUI doesn't render both during the spring animation.
-                    .matchedGeometryEffect(id: "island-icon", in: notchNamespace, isSource: !model.isOpened)
+                    .matchedGeometryEffect(
+                        id: "island-icon",
+                        in: notchNamespace,
+                        properties: .size,
+                        isSource: !model.isOpened
+                    )
+                    // Opt out of the ambient .animation(transitionAnimation,
+                    // value: model.state) applied to the body — without this,
+                    // Pet's position change between opened-header and closed-
+                    // header layouts gets animated as a big spring, making
+                    // the pet "slide in from outside" the closed pill's bounds.
+                    .transaction { $0.animation = nil }
+                    // Negative spacing overlaps the pet's arm tip (col 10-11
+                    // of the typing frame) with the Laptop's keyboard deck
+                    // so the hand lands on keys instead of floating in air.
                     if model.state == .working || model.anySessionWorking {
                         Laptop()
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.7, anchor: .bottom)),
+                                removal: .opacity
+                                    .combined(with: .offset(y: 8))
+                                    .combined(with: .scale(scale: 0.55, anchor: .bottom))
+                            ))
                     }
                 }
+                .animation(.easeInOut(duration: 1.0), value: model.state == .working || model.anySessionWorking)
                 if showsSessionTag {
                     Text(model.sessionTag)
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -190,18 +212,32 @@ struct NotchView: View {
 
     private var openedHeader: some View {
         HStack(spacing: 10) {
-            HStack(alignment: .bottom, spacing: 0) {
+            HStack(alignment: .bottom, spacing: -6) {
                 Pet(
                     state: model.state,
                     isCelebrating: model.celebrating,
                     anySessionWorking: model.anySessionWorking,
+                    workingStoppedAt: model.workingStoppedAt,
                     width: 28
                 )
-                .matchedGeometryEffect(id: "island-icon", in: notchNamespace, isSource: model.isOpened)
+                .matchedGeometryEffect(
+                    id: "island-icon",
+                    in: notchNamespace,
+                    properties: .size,
+                    isSource: model.isOpened
+                )
+                .transaction { $0.animation = nil }
                 if model.state == .working || model.anySessionWorking {
                     Laptop()
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.7, anchor: .bottom)),
+                            removal: .opacity
+                                .combined(with: .offset(y: 8))
+                                .combined(with: .scale(scale: 0.55, anchor: .bottom))
+                        ))
                 }
             }
+            .animation(.easeInOut(duration: 0.4), value: model.state == .working || model.anySessionWorking)
             Text(openedHeaderText)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
@@ -277,7 +313,7 @@ struct NotchView: View {
         Group {
             switch model.state {
             case .preview, .expand:
-                previewBody(expanded: model.state == .expand)
+                previewBody(expanded: model.state == .expand, dims: dims)
                     .id("preview-\(model.state == .expand ? "full" : "snippet")")
             case .question:
                 questionBody.id("question")
@@ -415,14 +451,21 @@ struct NotchView: View {
         return "⌃⌥ X to dismiss"
     }
 
-    private func previewBody(expanded: Bool) -> some View {
-        // New model: preview shows the snippet (first paragraph, 280-char
-        // safety cap); expand shows the full visible reply. No thinking
-        // or tool blocks — those don't render in the notch.
+    private func previewBody(expanded: Bool, dims: Dims) -> some View {
+        // Snippet mode keeps the compact 13pt / tight spacing the pill was
+        // tuned for. Expand mode goes for real prose: 15pt body, 1.45x
+        // line height, per-paragraph top margins (so headings get real
+        // section breaks), and a measure-capped column so lines stay in
+        // the 65-75 char comfortable reading range.
         let body = expanded ? model.lastTurnText : model.previewSnippet
         let paragraphs = Self.splitIntoParagraphs(body)
-        let fontSize: CGFloat = 13  // consistent size across states
+        let fontSize: CGFloat = expanded ? 15 : 13
+        let horizontalPadding: CGFloat = expanded ? 22 : 4
         let clampedAnchor = max(0, min(model.previewScrollAnchor, paragraphs.count - 1))
+
+        let columnWidth: CGFloat? = expanded
+            ? min(680, max(320, dims.openedWidth - 2 * horizontalPadding - 40))
+            : nil
 
         // Explicit frame height drives the ScrollView — measurement via
         // ContentHeightKey fills in the real number; estimator is the
@@ -436,17 +479,28 @@ struct NotchView: View {
         // J/K scroll only useful when content actually overflows.
         let needsScroll = naturalHeight > cap - 4
 
+        // Precompute heading levels once per render — `paragraphHeaderLevel`
+        // does a split on each paragraph's first line, which adds up fast
+        // when done inside the ForEach.
+        let headerLevels = paragraphs.map(Self.paragraphHeaderLevel)
+
         return VStack(alignment: .leading, spacing: 4) {
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(paragraphs.enumerated()), id: \.offset) { idx, para in
                             markdownText(para, size: fontSize)
                                 .id(idx)
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                                .frame(maxWidth: columnWidth ?? .infinity, alignment: .topLeading)
                                 .textSelection(.enabled)
+                                .padding(.top, Self.paragraphTopMargin(
+                                    at: idx,
+                                    headerLevels: headerLevels,
+                                    expanded: expanded
+                                ))
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 2)
                     .measuringHeight(into: model)
                 }
@@ -487,8 +541,8 @@ struct NotchView: View {
                     .foregroundStyle(.white.opacity(0.4))
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.top, 6)
+        .padding(.horizontal, horizontalPadding)
+        .padding(.top, expanded ? 10 : 6)
     }
 
     /// Splits body into paragraph chunks. Blank lines separate paragraphs
@@ -528,10 +582,154 @@ struct NotchView: View {
     private func markdownText(_ raw: String, size: CGFloat) -> some View {
         if Self.isMarkdownTable(raw) {
             Self.renderTable(raw, size: size)
+        } else if raw.hasPrefix("```") {
+            Self.renderFencedBlock(raw, size: size)
+        } else if let level = Self.pureHeaderLevel(raw) {
+            Self.renderHeader(raw, level: level, size: size)
+        } else if Self.isPureBlockquote(raw) {
+            Self.renderBlockquote(raw, size: size)
         } else {
             Text(Self.styledMarkdown(raw, size: size))
                 .multilineTextAlignment(.leading)
+                // Line height ~1.45x — enough breathing room for long
+                // prose without feeling airy. Tuned for 14-15pt body.
+                .lineSpacing(size * 0.35)
         }
+    }
+
+    /// True if `paragraph` is exactly a single heading line (no following
+    /// body text). Those get view-level rendering (accent bar + tracking)
+    /// for a real-designed feel. Mixed paragraphs fall through to the
+    /// AttributedString path.
+    private static func pureHeaderLevel(_ paragraph: String) -> Int? {
+        let lines = paragraph.split(separator: "\n", omittingEmptySubsequences: true)
+        guard lines.count == 1 else { return nil }
+        let line = String(lines[0])
+        if line.hasPrefix("### ") { return 3 }
+        if line.hasPrefix("## ")  { return 2 }
+        if line.hasPrefix("# ")   { return 1 }
+        return nil
+    }
+
+    /// Renders H1/H2/H3 with tracking + (H2 only) a Claude-orange accent
+    /// bar on the left. Inline markdown inside the heading still parses.
+    @ViewBuilder
+    private static func renderHeader(_ raw: String, level: Int, size: CGFloat) -> some View {
+        let prefixLen = level == 1 ? 2 : (level == 2 ? 3 : 4)
+        let text = String(raw.dropFirst(prefixLen))
+        let headerSize: CGFloat = size + CGFloat(level == 1 ? 8 : (level == 2 ? 5 : 2))
+        let weight: Font.Weight = level == 3 ? .semibold : .bold
+        let baseFont = Font.system(size: headerSize, weight: weight)
+        let attr = parseLine(text, size: headerSize, baseFont: baseFont, baseColor: mdHeader)
+
+        if level == 2 {
+            HStack(alignment: .top, spacing: 12) {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(mdAccent)
+                    .frame(width: 3)
+                Text(attr)
+                    .multilineTextAlignment(.leading)
+                    .tracking(-0.3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(attr)
+                .multilineTextAlignment(.leading)
+                .tracking(-0.3)
+        }
+    }
+
+    /// True if every non-empty line starts with `> `. Mixed paragraphs
+    /// (quote + body) would fall through to the inline parser which
+    /// handles per-line quote rendering; the view-level path here only
+    /// activates for clean pure-quote blocks so we can give them the
+    /// consistent left-bar treatment.
+    private static func isPureBlockquote(_ paragraph: String) -> Bool {
+        let lines = paragraph.split(separator: "\n", omittingEmptySubsequences: true)
+        guard !lines.isEmpty else { return false }
+        return lines.allSatisfy { $0.hasPrefix("> ") }
+    }
+
+    /// Blockquote with a left-bar accent (muted white, not orange — the
+    /// orange is reserved for code blocks). Italic body text at `mdQuote`
+    /// keeps the traditional quote feel while matching the visual
+    /// grammar of code blocks.
+    private static func renderBlockquote(_ raw: String, size: CGFloat) -> some View {
+        let body = raw
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0) }
+            .map { $0.hasPrefix("> ") ? String($0.dropFirst(2)) : $0 }
+            .joined(separator: "\n")
+        let baseFont = Font.system(size: size, weight: .regular).italic()
+        let attr = parseLine(body, size: size, baseFont: baseFont, baseColor: mdQuote)
+        return HStack(alignment: .top, spacing: 12) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(Color.white.opacity(0.22))
+                .frame(width: 3)
+            Text(attr)
+                .multilineTextAlignment(.leading)
+                .lineSpacing(size * 0.3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.vertical, 4)
+    }
+
+    /// Fenced code block with a Claude-orange left accent bar and an
+    /// optional top-right language pill (when the opener is ```swift`,
+    /// ```bash`, etc). Pulls the orange OUT of the text so the body
+    /// stays calm white-90%.
+    private static func renderFencedBlock(_ raw: String, size: CGFloat) -> some View {
+        let parsed = parseFencedBlock(raw)
+        return ZStack(alignment: .topTrailing) {
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(mdAccent)
+                    .frame(width: 3)
+                Text(parsed.body)
+                    .font(.system(size: size - 1, weight: .regular, design: .monospaced))
+                    .foregroundStyle(mdCodeBlock)
+                    .lineSpacing(size * 0.25)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+
+            if let language = parsed.language {
+                Text(language.uppercased())
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(0.6)
+                    .foregroundStyle(Color.white.opacity(0.50))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.08))
+                    )
+                    .padding(.top, 6)
+                    .padding(.trailing, 8)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    /// Splits a ```fenced``` block into its optional language tag (from
+    /// the opening fence, e.g. `swift`, `bash`) and the inner body with
+    /// both fences removed.
+    private static func parseFencedBlock(_ raw: String) -> (language: String?, body: String) {
+        var lines = raw.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var language: String?
+        if let first = lines.first, first.hasPrefix("```") {
+            let tag = String(first.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+            if !tag.isEmpty { language = tag }
+            lines.removeFirst()
+        }
+        if let last = lines.last, last.hasPrefix("```") { lines.removeLast() }
+        return (language, lines.joined(separator: "\n"))
     }
 
     /// Detects GitHub-flavored markdown tables:
@@ -599,17 +797,23 @@ struct NotchView: View {
         )
     }
 
-    // Color tokens for markdown rendering. Tuned to read clearly against
-    // the black notch surface and stay coherent with the pet's orange.
-    private static let mdRegular = Color.white.opacity(0.95)
-    private static let mdBold    = Color.white                                 // brighter than regular
-    private static let mdItalic  = Color(red: 0.85, green: 0.95, blue: 0.85)   // mint tint
-    private static let mdCode    = Color(red: 0.96, green: 0.66, blue: 0.45)   // Claude orange
-    private static let mdHeader  = Color.white                                 // pure white, larger
-    private static let mdBullet  = Color(red: 0.96, green: 0.66, blue: 0.45)   // Claude orange marker
-    private static let mdQuote   = Color(white: 0.70)                          // dim italic
-    private static let mdThinking = Color(white: 0.55)                         // dim grey
-    private static let mdToolHead = Color(red: 0.50, green: 0.80, blue: 0.95)  // soft cyan
+    // Color tokens for markdown rendering. Claude orange is reserved as a
+    // single accent — it appears ONLY on the left border of fenced code
+    // blocks and on the session tag chip. Inline code, bullets, numerals,
+    // headers, and bold all use weight + size + subtle tonal shifts instead
+    // of color, so the eye can actually find the important things.
+    private static let mdRegular   = Color.white.opacity(0.88)                  // body — softer than pure white for long reads
+    private static let mdBold      = Color.white                                // bold pops without shifting color
+    private static let mdItalic    = Color.white.opacity(0.92)                  // gentle italic tint
+    private static let mdCode      = Color.white.opacity(0.95)                  // inline code text
+    private static let mdCodeBg    = Color.white.opacity(0.10)                  // inline code pill background
+    private static let mdCodeBlock = Color.white.opacity(0.90)                  // fenced block body
+    private static let mdHeader    = Color.white                                // pure white for hierarchy
+    private static let mdBullet    = Color.white.opacity(0.55)                  // structural markers, not accents
+    private static let mdQuote     = Color(white: 0.70)                         // dim italic
+    private static let mdThinking  = Color(white: 0.55)                         // dim grey
+    private static let mdToolHead  = Color(red: 0.50, green: 0.80, blue: 0.95)  // soft cyan
+    private static let mdAccent    = Color(red: 0.96, green: 0.66, blue: 0.45)  // Claude orange — rare accent only
 
     /// Parses markdown and applies styles. Recognizes block elements
     /// (headers, bullets, blockquotes, fenced code blocks) at the line
@@ -693,12 +897,14 @@ struct NotchView: View {
     }
 
     /// `# h1`, `## h2`, `### h3`. Inline formatting inside the heading
-    /// text is also parsed so `## **bold heading**` works.
+    /// text is also parsed so `## **bold heading**` works. Sizes chosen
+    /// so body (base) → h3 → h2 → h1 is a real ladder (base, +2, +5, +8)
+    /// rather than the near-flat base, +2, +4, +6.
     private static func parseHeader(_ line: String, baseSize: CGFloat) -> AttributedString? {
         let levels: [(String, CGFloat, Font.Weight)] = [
             ("### ", baseSize + 2, .semibold),
-            ("## ",  baseSize + 4, .semibold),
-            ("# ",   baseSize + 6, .bold),
+            ("## ",  baseSize + 5, .bold),
+            ("# ",   baseSize + 8, .bold),
         ]
         for (prefix, size, weight) in levels {
             if line.hasPrefix(prefix) {
@@ -724,7 +930,9 @@ struct NotchView: View {
         return nil
     }
 
-    /// `- item` or `* item` → "•  item" with orange bullet.
+    /// `- item` or `* item` → "‣  item" with a dim triangular bullet
+    /// (sized slightly smaller than body) so it reads as a structural
+    /// marker rather than a loud accent.
     private static func parseBullet(
         _ line: String,
         size: CGFloat,
@@ -733,14 +941,15 @@ struct NotchView: View {
         let stripped = line.drop { $0 == " " }
         guard stripped.hasPrefix("- ") || stripped.hasPrefix("* ") else { return nil }
         let content = String(stripped.dropFirst(2))
-        var out = AttributedString("•  ")
-        out.font = Font.system(size: size, weight: .bold)
+        var out = AttributedString("‣  ")
+        out.font = Font.system(size: size * 0.95, weight: .regular)
         out.foregroundColor = mdBullet
         out.append(parseLine(content, size: size, baseFont: baseFont, baseColor: mdRegular))
         return out
     }
 
-    /// `1. item`, `2. item`, … → "1.  item" with orange numeral.
+    /// `1. item`, `2. item`, … → "1.  item" with dim numeral so the
+    /// content reads as primary, not the structure.
     private static func parseNumbered(
         _ line: String,
         size: CGFloat,
@@ -759,7 +968,7 @@ struct NotchView: View {
         let number = String(stripped[stripped.startIndex..<idx])
         let content = String(stripped[stripped.index(idx, offsetBy: 2)...])
         var out = AttributedString("\(number).  ")
-        out.font = Font.system(size: size, weight: .semibold, design: .monospaced)
+        out.font = Font.system(size: size, weight: .medium)
         out.foregroundColor = mdBullet
         out.append(parseLine(content, size: size, baseFont: baseFont, baseColor: mdRegular))
         return out
@@ -846,8 +1055,9 @@ struct NotchView: View {
                 styled.font = Font.system(size: size, weight: .medium).italic()
                 styled.foregroundColor = Self.mdItalic
             case .code:
-                styled.font = Font.system(size: size, weight: .medium, design: .monospaced)
+                styled.font = Font.system(size: size - 1, weight: .medium, design: .monospaced)
                 styled.foregroundColor = Self.mdCode
+                styled.backgroundColor = Self.mdCodeBg
             }
             out.append(styled)
 
@@ -864,6 +1074,52 @@ struct NotchView: View {
             case .italic, .code: return 1
             }
         }
+    }
+
+    /// Per-paragraph top margin — replaces a uniform VStack spacing so
+    /// headings get real section breaks without the body paragraphs
+    /// feeling over-gapped. Snippet mode keeps the old uniform gutter.
+    ///
+    /// Thresholds (expand mode):
+    ///   - first paragraph: 0
+    ///   - H1: 26
+    ///   - H2: 20 (18 if preceded by H1)
+    ///   - H3: 14
+    ///   - body directly under a heading: 6 (tighter — belongs to heading)
+    ///   - regular body-to-body gutter: 14
+    static func paragraphTopMargin(
+        at idx: Int,
+        headerLevels: [Int?],
+        expanded: Bool
+    ) -> CGFloat {
+        guard idx > 0 else { return 0 }
+        guard expanded else { return 8 }  // snippet mode: uniform tight
+        let level = headerLevels[idx]
+        let prevLevel = headerLevels[idx - 1]
+        if let level {
+            // Headings get a big top break.
+            switch level {
+            case 1: return 26
+            case 2: return (prevLevel == 1 ? 18 : 20)
+            case 3: return 14
+            default: return 14
+            }
+        }
+        if prevLevel != nil { return 6 }  // hug the heading above
+        return 14                          // regular body-to-body gutter
+    }
+
+    /// 1/2/3 if the paragraph's first non-empty line starts with the
+    /// corresponding ATX header prefix; nil otherwise.
+    private static func paragraphHeaderLevel(_ paragraph: String) -> Int? {
+        let firstLine = paragraph
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .first
+            .map(String.init) ?? paragraph
+        if firstLine.hasPrefix("# ")   { return 1 }
+        if firstLine.hasPrefix("## ")  { return 2 }
+        if firstLine.hasPrefix("### ") { return 3 }
+        return nil
     }
 
     /// Cap on rendered preview height as a fraction of the visible screen.

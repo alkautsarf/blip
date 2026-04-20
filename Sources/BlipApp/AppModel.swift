@@ -11,7 +11,9 @@ import BlipCore
 final class AppModel: ObservableObject {
     // MARK: - Published UI state
 
-    @Published var state: ShapeState = .idle
+    @Published var state: ShapeState = .idle {
+        didSet { handlePassiveDismiss(oldState: oldValue, newState: state) }
+    }
     @Published var celebrating: Bool = false
     @Published var hovering: Bool = false
     @Published var focusedOption: Int = 0
@@ -46,9 +48,28 @@ final class AppModel: ObservableObject {
     /// re-render when the registry changes — without making callers
     /// observe both.
     private var sessionsSubscription: AnyCancellable?
+    private var workingTransitionSubscription: AnyCancellable?
+    /// Timestamp of the most recent transition from "any session working"
+    /// to "no session working". Pet reads this to show a brief pack-up
+    /// pose (arms in, compact crouch) before the full idle-rest pose.
+    @Published private(set) var workingStoppedAt: Date? = nil
+    /// Tracks the previous `anySessionWorking` value so we only set
+    /// `workingStoppedAt` on true→false transitions, never on the
+    /// subscription's initial emission (which can be false on launch).
+    private var lastAnyWorkingTrack: Bool = false
     init() {
         sessionsSubscription = sessions.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
+        workingTransitionSubscription = sessions.$activeIds
+            .map { !$0.isEmpty }
+            .removeDuplicates()
+            .sink { [weak self] isWorking in
+                guard let self else { return }
+                if self.lastAnyWorkingTrack && !isWorking {
+                    self.workingStoppedAt = Date()
+                }
+                self.lastAnyWorkingTrack = isWorking
+            }
     }
 
     // MARK: - Last-event bookkeeping
@@ -59,7 +80,18 @@ final class AppModel: ObservableObject {
     @Published private(set) var lastSessionId: String? = nil
     @Published private(set) var lastTranscriptPath: String? = nil
     @Published private(set) var notificationMessage: String? = nil
-    private var notificationDismissTask: Task<Void, Never>? = nil
+    /// Originating tmux pane for whatever passive surface is currently
+    /// displayed (peek/preview/stack). Drives the focus-aware dismiss —
+    /// when the user switches to this pane, the notch clears itself.
+    @Published private(set) var lastTmuxPane: String? = nil
+    /// 12-second safety-net timeout that dismisses passive surfaces
+    /// (peek/preview/stack) so abandoned content doesn't squat on
+    /// the notch forever. Cancelled on every state transition.
+    private var passiveDismissTask: Task<Void, Never>? = nil
+    /// Polls every 3s while a passive surface is displayed; clears it
+    /// the moment the originating tmux pane gets focus. Runs in
+    /// parallel with the 12s timeout task — whichever fires first wins.
+    private var passiveFocusTask: Task<Void, Never>? = nil
 
     /// Frozen snapshot of the session entries at the moment `.stack`
     /// was entered. Keeps the view stable while the user navigates —
@@ -409,6 +441,7 @@ final class AppModel: ObservableObject {
 
         lastSessionId = event.sessionId
         lastCwd = event.cwd
+        lastTmuxPane = event.tmuxPane
         lastTranscriptPath = event.transcriptPath
         lastTurnText = resolvedText
         sessionTag = Self.composeSessionTag(cwd: event.cwd)
@@ -437,7 +470,11 @@ final class AppModel: ObservableObject {
     /// so we don't flip the working flag. Just ensures the session
     /// is in the registry so it's visible in the overview.
     func apply(notification event: NotificationEvent) {
-        sessions.recordSessionStart(sessionId: event.sessionId, cwd: event.cwd)
+        sessions.recordSessionStart(
+            sessionId: event.sessionId,
+            cwd: event.cwd,
+            tmuxPane: event.tmuxPane
+        )
         notificationMessage = event.message
         lastSessionId = event.sessionId
         lastCwd = event.cwd
@@ -453,17 +490,61 @@ final class AppModel: ObservableObject {
             state = .peek
         }
 
-        // Auto-clear after 6 seconds.
-        notificationDismissTask?.cancel()
-        let token = event.message
-        notificationDismissTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 6_000_000_000)
+        lastTmuxPane = event.tmuxPane
+    }
+
+    /// Arms a 12s timeout + focus-poll pair when entering a passive
+    /// surface (peek / preview / stack). Expand, question, sessions,
+    /// working, idle skip auto-dismiss — they're either actively-read,
+    /// user-driven, or already closed.
+    private func handlePassiveDismiss(oldState: ShapeState, newState: ShapeState) {
+        passiveDismissTask?.cancel()
+        passiveFocusTask?.cancel()
+        passiveDismissTask = nil
+        passiveFocusTask = nil
+
+        let surfaces: Set<ShapeState> = [.peek, .preview, .stack]
+        guard surfaces.contains(newState) else { return }
+
+        let armedState = newState
+        let armedPane = lastTmuxPane
+        FileHandle.standardError.write(Data(
+            "[AppModel] passive-dismiss armed — state=\(armedState) pane=\(armedPane ?? "nil")\n".utf8
+        ))
+        passiveDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
             guard !Task.isCancelled else { return }
-            if notificationMessage == token {
-                notificationMessage = nil
-                if state == .peek { state = .idle }
+            FileHandle.standardError.write(Data(
+                "[AppModel] passive-dismiss timeout — state=\(state)\n".utf8
+            ))
+            clearPassive(armedFor: armedState)
+        }
+        if let armedPane, !armedPane.isEmpty {
+            passiveFocusTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    // Same two-layer (terminal frontmost + pane active)
+                    // check BridgeListener uses to suppress Stop surfaces.
+                    if await TerminalFocusDetector.shouldSuppress(paneId: armedPane) {
+                        FileHandle.standardError.write(Data(
+                            "[AppModel] passive-dismiss focus-match — state=\(self.state)\n".utf8
+                        ))
+                        clearPassive(armedFor: armedState)
+                        return
+                    }
+                }
             }
         }
+    }
+
+    /// Shared exit for passive-surface dismiss. Only clears if the
+    /// current state is still the one we armed for — avoids clobbering
+    /// a newer surface that appeared while the timer was pending.
+    private func clearPassive(armedFor armedState: ShapeState) {
+        guard state == armedState else { return }
+        if state == .peek { notificationMessage = nil }
+        state = .idle
     }
 
     /// Second-phase update after the (potentially slow) cumulative token

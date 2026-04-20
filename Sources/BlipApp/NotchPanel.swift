@@ -35,6 +35,8 @@ final class NotchPanelController {
     let panel: NotchPanel
     let model: AppModel
     private let hosting: NSHostingView<AnyView>
+    private var fullscreenMonitor: FullscreenMonitor!
+    private var suppressedByFullscreen = false
 
     init(model: AppModel) {
         self.model = model
@@ -44,6 +46,10 @@ final class NotchPanelController {
         let rect = NSRect(x: 0, y: 0, width: 900, height: 300)
         self.panel = NotchPanel(contentRect: rect, hosting: hosting)
         hosting.frame = rect
+
+        self.fullscreenMonitor = FullscreenMonitor { [weak self] fullscreen in
+            MainActor.assumeIsolated { self?.handleFullscreen(fullscreen) }
+        }
     }
 
     /// Snaps the panel to the requested display. Logs geometry so we can
@@ -65,7 +71,26 @@ final class NotchPanelController {
             y: pick.screen.frame.maxY - panelSize.height
         )
         panel.setFrameOrigin(origin)
-        panel.orderFrontRegardless()
+
+        fullscreenMonitor.setTarget(pick.screen)
+        if !suppressedByFullscreen {
+            panel.orderFrontRegardless()
+        }
+    }
+
+    private func handleFullscreen(_ fullscreen: Bool) {
+        suppressedByFullscreen = fullscreen
+        if fullscreen {
+            panel.orderOut(nil)
+            FileHandle.standardError.write(
+                Data("[blip.fullscreen] notch hidden — fullscreen detected on target display\n".utf8)
+            )
+        } else {
+            panel.orderFrontRegardless()
+            FileHandle.standardError.write(
+                Data("[blip.fullscreen] notch restored — fullscreen exited\n".utf8)
+            )
+        }
     }
 
     private func logGeometry(screen: NSScreen, notchSize: CGSize, hasHardwareNotch: Bool) {

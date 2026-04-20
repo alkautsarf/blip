@@ -14,10 +14,13 @@ A macOS notch app for terminal-native [Claude Code](https://www.anthropic.com/cl
 
 **What you get**
 
-- **Live preview** of Claude's last reply in the notch, with markdown (bold, italic, code, headers, bullets, quotes, fenced blocks, tables)
+- **Live preview** of Claude's last reply in the notch, with rich markdown — H1/H2/H3 hierarchy with accent bars, 15pt body at 1.45× line-spacing, inline code pills, language-tagged fenced code blocks, blockquote borders, tables, refined bullets
 - **Carousel stack** when multiple concurrent sessions finish within a 30-second window — navigate with ⌃⌥ J/K, jump to any with ⌃⌥ Enter
 - **Sessions overview** (⌃⌥ L) — pull-UI list of every live Claude session with working/idle status; seeds from a tmux+pid scan so pre-existing panes are visible immediately
 - **Focus-aware suppression** — events for the pane you're already watching don't interrupt you; other sessions still surface
+- **Auto-dismiss** after 12s OR instantly when you focus the originating pane — no abandoned peeks squatting on the notch
+- **Fullscreen-aware hiding** — notch `orderOut`s when any app goes fullscreen on the same display; other displays unaffected
+- **Animated pet** with 10-activity idle rotation (wave, stretch, drowsy, curious, dance, skateboard, headphones, workout, meditation, boxing) — shuffled-deck scheduling means variety without repetition
 - **AskUserQuestion picker** intercepts the tool at the hook layer and lets you pick directly from the notch (⌃⌥ 1–8)
 - **Permission + plan-mode peeks** surface a calm notification above the closed pill
 - **Jump-to-tmux** on ⌃⌥ Enter — switches tmux session/window/pane to wherever the reply came from, then clears the notch
