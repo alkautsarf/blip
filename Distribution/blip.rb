@@ -12,10 +12,10 @@ class Blip < Formula
 
   def install
     system "swift", "build", "-c", "release", "--disable-sandbox"
-    bin.install ".build/release/Blip"
-    bin.install ".build/release/BlipApp"
-    bin.install ".build/release/BlipHooks"
-    bin.install ".build/release/BlipSetup"
+    bin.install ".build/release/Blip"      => "blip"
+    bin.install ".build/release/BlipApp"   => "BlipApp"
+    bin.install ".build/release/BlipHooks" => "BlipHooks"
+    bin.install ".build/release/BlipSetup" => "BlipSetup"
   end
 
   def caveats

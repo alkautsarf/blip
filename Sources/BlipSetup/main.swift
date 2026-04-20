@@ -46,27 +46,7 @@ do {
     exit(1)
 }
 
-/// Locates the BlipHooks binary alongside the BlipSetup binary, working
-/// even when BlipSetup is invoked via a PATH symlink.
+/// Locates the BlipHooks binary alongside the BlipSetup binary.
 func resolveHookBinary() throws -> URL {
-    var buffer = [CChar](repeating: 0, count: 4096)
-    var size = UInt32(buffer.count)
-    guard _NSGetExecutablePath(&buffer, &size) == 0 else {
-        struct MissingBinaryError: LocalizedError {
-            var errorDescription: String? { "could not resolve BlipSetup executable path" }
-        }
-        throw MissingBinaryError()
-    }
-    let setupBinary = URL(fileURLWithPath: String(cString: buffer)).resolvingSymlinksInPath()
-    let hookBinary = setupBinary.deletingLastPathComponent().appendingPathComponent("BlipHooks")
-    guard FileManager.default.isExecutableFile(atPath: hookBinary.path) else {
-        struct MissingBinaryError: LocalizedError {
-            let path: String
-            var errorDescription: String? {
-                "BlipHooks binary not found at \(path) — `swift build` first"
-            }
-        }
-        throw MissingBinaryError(path: hookBinary.path)
-    }
-    return hookBinary
+    try ExecutableLookup.sibling(named: "BlipHooks")
 }

@@ -20,6 +20,30 @@ struct ContentHeightKey: PreferenceKey {
     }
 }
 
+extension View {
+    /// Writes natural rendered height back to `model.measuredPreviewHeight`
+    /// when it changes by more than 0.5pt. Skips writes under 1pt to
+    /// avoid churn during SwiftUI's initial layout pass.
+    func measuringHeight(into model: AppModel) -> some View {
+        self
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: ContentHeightKey.self,
+                        value: geo.size.height
+                    )
+                }
+            )
+            .onPreferenceChange(ContentHeightKey.self) { height in
+                Task { @MainActor in
+                    if height > 1 && abs(model.measuredPreviewHeight - height) > 0.5 {
+                        model.measuredPreviewHeight = height
+                    }
+                }
+            }
+    }
+}
+
 struct NotchView: View {
     @ObservedObject var model: AppModel
     @Namespace private var notchNamespace
@@ -299,21 +323,7 @@ struct NotchView: View {
                         }
                     }
                     .padding(.bottom, 2)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ContentHeightKey.self,
-                                value: geo.size.height
-                            )
-                        }
-                    )
-                }
-                .onPreferenceChange(ContentHeightKey.self) { height in
-                    Task { @MainActor in
-                        if height > 1 && abs(model.measuredPreviewHeight - height) > 0.5 {
-                            model.measuredPreviewHeight = height
-                        }
-                    }
+                    .measuringHeight(into: model)
                 }
                 .frame(height: scrollHeight)
                 .id(body)
@@ -759,21 +769,7 @@ struct NotchView: View {
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
                     }
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ContentHeightKey.self,
-                                value: geo.size.height
-                            )
-                        }
-                    )
-                }
-                .onPreferenceChange(ContentHeightKey.self) { height in
-                    Task { @MainActor in
-                        if height > 1 && abs(model.measuredPreviewHeight - height) > 0.5 {
-                            model.measuredPreviewHeight = height
-                        }
-                    }
+                    .measuringHeight(into: model)
                 }
                 .frame(height: textHeight)
                 .padding(.bottom, 4)
@@ -844,21 +840,7 @@ struct NotchView: View {
                     }
                 }
                 .padding(.bottom, 2)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: ContentHeightKey.self,
-                            value: geo.size.height
-                        )
-                    }
-                )
-            }
-            .onPreferenceChange(ContentHeightKey.self) { height in
-                Task { @MainActor in
-                    if height > 1 && abs(model.measuredPreviewHeight - height) > 0.5 {
-                        model.measuredPreviewHeight = height
-                    }
-                }
+                .measuringHeight(into: model)
             }
             .frame(height: scrollHeight)
 

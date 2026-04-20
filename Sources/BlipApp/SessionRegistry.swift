@@ -141,7 +141,7 @@ final class SessionRegistry: ObservableObject {
         }
     }
 
-    private static func composeSessionTag(cwd: String) -> String {
+    static func composeSessionTag(cwd: String) -> String {
         let basename = (cwd as NSString).lastPathComponent
         return basename.isEmpty ? "session" : basename
     }

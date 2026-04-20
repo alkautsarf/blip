@@ -34,7 +34,9 @@ default:
 
 enum LifecyclePaths {
     static let pidFile: URL = {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? home.appendingPathComponent("Library/Application Support")
         return support.appendingPathComponent("blip/blip.pid")
     }()
     static let logFile: URL = {
@@ -330,18 +332,5 @@ enum BlipCLIError: Error, LocalizedError {
 }
 
 func resolveSibling(_ name: String) throws -> URL {
-    // _NSGetExecutablePath gives the actual executable path, even when
-    // invoked via a PATH lookup or symlink. resolvingSymlinksInPath()
-    // then follows the symlink so siblings resolve in the build dir.
-    var buffer = [CChar](repeating: 0, count: 4096)
-    var size = UInt32(buffer.count)
-    guard _NSGetExecutablePath(&buffer, &size) == 0 else {
-        throw BlipCLIError.siblingMissing(name)
-    }
-    let cliBinary = URL(fileURLWithPath: String(cString: buffer)).resolvingSymlinksInPath()
-    let sibling = cliBinary.deletingLastPathComponent().appendingPathComponent(name)
-    guard FileManager.default.isExecutableFile(atPath: sibling.path) else {
-        throw BlipCLIError.siblingMissing(sibling.path)
-    }
-    return sibling
+    try ExecutableLookup.sibling(named: name)
 }

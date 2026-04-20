@@ -74,6 +74,6 @@ final class NotchPanelController {
             "safeAreaTop=\(screen.safeAreaInsets.top) visibleFrameGap=\(gap) " +
             "statusThickness=\(NSStatusBar.system.thickness) " +
             "→ notchSize=\(notchSize) hardwareNotch=\(hasHardwareNotch)\n"
-        FileHandle.standardError.write(msg.data(using: .utf8)!)
+        FileHandle.standardError.write(Data(msg.utf8))
     }
 }

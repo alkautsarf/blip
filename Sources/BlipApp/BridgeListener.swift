@@ -57,8 +57,10 @@ final class BridgeListener {
         }
     }
 
+    private static let isoFormatter: ISO8601DateFormatter = ISO8601DateFormatter()
+
     private func log(_ message: String) {
-        let line = "[\(ISO8601DateFormatter().string(from: Date()))] [BridgeListener] \(message)\n"
+        let line = "[\(Self.isoFormatter.string(from: Date()))] [BridgeListener] \(message)\n"
         FileHandle.standardError.write(Data(line.utf8))
     }
 

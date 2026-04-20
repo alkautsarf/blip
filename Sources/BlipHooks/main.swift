@@ -203,97 +203,6 @@ struct BlipHooksCLI {
         }
     }
 
-    // MARK: - ExitPlanMode (legacy picker — unused, kept for reference)
-
-    /// Synthesizes an AskUserQuestion with approve/reject options
-    /// containing the plan text, then routes the user's choice into
-    /// the appropriate hook decision.
-    private static func handleExitPlanMode(json: [String: Any], stdin: Data) {
-        let toolInput = (json["tool_input"] as? [String: Any]) ?? [:]
-        let plan = (toolInput["plan"] as? String) ?? "(no plan text)"
-
-        let synthetic = AskUserQuestionInput(questions: [
-            .init(
-                header: "plan",
-                questionText: plan,
-                multiSelect: false,
-                options: [
-                    .init(label: "approve", description: "exit plan mode and execute"),
-                    .init(label: "reject",  description: "stay in plan mode for revisions"),
-                ]
-            )
-        ])
-        let request = AskUserQuestionRequest(
-            sessionId: (json["session_id"] as? String) ?? "",
-            cwd: (json["cwd"] as? String) ?? "",
-            input: synthetic
-        )
-
-        do {
-            let response = try BridgeClient.sendAndReceive(
-                .command(.askUserQuestion(request)),
-                to: SocketPath.resolved()
-            )
-            guard let payload = response.payload,
-                  case .askUserQuestionResponse(let answer) = payload
-            else {
-                FileHandle.standardOutput.write(stdin); return
-            }
-
-            if answer.dismissed || answer.answers.first?.first == nil {
-                // Dismiss = pass through (let Claude's TUI show plan).
-                FileHandle.standardOutput.write(stdin)
-                return
-            }
-            let pick = answer.answers[0][0]
-            // Emit explicit allow/deny so Claude Code skips the TUI prompt.
-            // Without permissionDecision the tool still triggers its own
-            // approval flow even when we echo stdin verbatim.
-            let decision: [String: Any]
-            if pick == "approve" {
-                decision = [
-                    "hookSpecificOutput": [
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "allow",
-                        "permissionDecisionReason": "Plan approved via blip notch.",
-                    ]
-                ]
-            } else {
-                decision = [
-                    "hookSpecificOutput": [
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": "User chose to stay in plan mode for revisions.",
-                    ]
-                ]
-            }
-            if let data = try? JSONSerialization.data(withJSONObject: decision) {
-                FileHandle.standardOutput.write(data)
-            } else {
-                FileHandle.standardOutput.write(stdin)
-            }
-        } catch {
-            log("plan picker failed: \(error.localizedDescription) — falling back to TUI")
-            FileHandle.standardOutput.write(stdin)
-        }
-    }
-
-    /// Formats the user's answer(s) as a human-readable string Claude
-    /// can include in its context. Single-question, single-answer is
-    /// the common case.
-    private static func formatAnswer(_ answers: [[String]], for questions: [AskUserQuestionInput.Question]) -> String {
-        guard !answers.isEmpty else { return "User did not answer." }
-        if answers.count == 1, let single = answers.first, single.count == 1 {
-            return "User picked: \(single[0])"
-        }
-        var parts: [String] = []
-        for (i, picks) in answers.enumerated() {
-            let questionText = i < questions.count ? questions[i].questionText : "Question \(i + 1)"
-            parts.append("- \(questionText): \(picks.joined(separator: ", "))")
-        }
-        return "User picked:\n" + parts.joined(separator: "\n")
-    }
-
     // MARK: - Side-effect dispatch per event
 
     private static func writeNotifFile(
@@ -334,20 +243,21 @@ struct BlipHooksCLI {
         }
     }
 
+    private static let isoFormatter: ISO8601DateFormatter = ISO8601DateFormatter()
+
     private static func log(_ message: String) {
-        let line = "[\(ISO8601DateFormatter().string(from: Date()))] [BlipHooks] \(message)\n"
-        FileHandle.standardError.write(Data(line.utf8))
+        let line = "[\(isoFormatter.string(from: Date()))] [BlipHooks] \(message)\n"
+        let data = Data(line.utf8)
+        FileHandle.standardError.write(data)
         // Also append to a debug log we can tail without going through
         // Claude Code's stderr capture.
-        if let data = line.data(using: .utf8) {
-            let url = URL(fileURLWithPath: "/tmp/blip-hooks-debug.log")
-            if let handle = try? FileHandle(forWritingTo: url) {
-                try? handle.seekToEnd()
-                handle.write(data)
-                try? handle.close()
-            } else {
-                try? data.write(to: url)
-            }
+        let url = URL(fileURLWithPath: "/tmp/blip-hooks-debug.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            try? handle.seekToEnd()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
         }
     }
 }

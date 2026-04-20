@@ -28,6 +28,10 @@ public final class BridgeServer {
     private var listenSource: DispatchSourceRead?
     private var connections: [Int32: ConnectionState] = [:]
 
+    // Serial ioQueue serializes access; safe to share.
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
+
     private struct ConnectionState {
         let fd: Int32
         let source: DispatchSourceRead
@@ -138,7 +142,7 @@ public final class BridgeServer {
             let line = data.subdata(in: 0..<newline)
             data.removeSubrange(0...newline)
             connections[fd]?.buffer = data
-            guard let envelope = try? JSONDecoder().decode(BridgeEnvelope.self, from: line) else {
+            guard let envelope = try? Self.decoder.decode(BridgeEnvelope.self, from: line) else {
                 continue
             }
             dispatch(envelope, from: fd)
@@ -173,7 +177,7 @@ public final class BridgeServer {
             guard self.connections[fd] != nil else { return }
             var data: Data
             do {
-                data = try JSONEncoder().encode(envelope)
+                data = try Self.encoder.encode(envelope)
                 data.append(0x0A)
             } catch { return }
             data.withUnsafeBytes { raw in

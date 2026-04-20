@@ -81,8 +81,6 @@ final class AppModel: ObservableObject {
     }
 
     private static let demoOptions = ["ship it", "one more pass", "roll back"]
-    /// Compatibility alias for code that already references `fakeOptions`.
-    var fakeOptions: [String] { displayedOptions }
 
     // MARK: - Derived
 
@@ -344,7 +342,7 @@ final class AppModel: ObservableObject {
         let recent = sessions.recentEntries()
         let tags = recent.map(\.sessionTag).joined(separator: ",")
         FileHandle.standardError.write(Data(
-            "[AppModel] apply(stop) session=\(Self.composeSessionTag(cwd: event.cwd)) recent=\(recent.count) [\(tags)]\n".utf8
+            "[AppModel] apply(stop) session=\(sessionTag) recent=\(recent.count) [\(tags)]\n".utf8
         ))
         if recent.count >= 2 {
             stackSnapshot = recent
@@ -434,7 +432,6 @@ final class AppModel: ObservableObject {
     }
 
     private static func composeSessionTag(cwd: String) -> String {
-        let basename = (cwd as NSString).lastPathComponent
-        return basename.isEmpty ? "session" : basename
+        SessionRegistry.composeSessionTag(cwd: cwd)
     }
 }
