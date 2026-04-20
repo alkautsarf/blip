@@ -43,15 +43,19 @@ final class BridgeListener {
         case .userPromptSubmit:  tag = "userPromptSubmit"
         case .sessionStart:      tag = "sessionStart"
         case .notification:      tag = "notification"
+        case .heartbeat:         tag = "heartbeat"
         case .askUserQuestion:   tag = "askUserQuestion"
         case .askUserQuestionResponse: tag = "askUserQuestionResponse"
         }
-        log("recv \(tag)")
+        // Skip heartbeat logging — fires every few seconds during work
+        // and would drown out everything else.
+        if tag != "heartbeat" { log("recv \(tag)") }
         switch payload {
         case .stop(let event):              handleStop(event)
         case .userPromptSubmit(let event):  model.apply(prompt: event)
-        case .sessionStart:                 break
+        case .sessionStart(let event):      model.apply(sessionStart: event)
         case .notification(let event):      model.apply(notification: event)
+        case .heartbeat(let event):         model.apply(heartbeat: event)
         case .askUserQuestion:              break
         case .askUserQuestionResponse:      break
         }
@@ -102,8 +106,14 @@ final class BridgeListener {
             FileHandle.standardError.write(Data(
                 "[BridgeListener] stop: source=\(usePayload ? "payload" : "tail") text=\(textMs)ms\n".utf8
             ))
+
+            // Focus-aware suppression: if the user is already looking
+            // at this session's tmux pane, skip the notch surface.
+            // Registry still records for pet state tracking.
+            let suppressed = await TerminalFocusDetector.shouldSuppress(paneId: event.tmuxPane)
+
             await MainActor.run {
-                model.apply(stop: event, lastText: lastText, outputTokens: 0)
+                model.apply(stop: event, lastText: lastText, outputTokens: 0, suppressed: suppressed)
             }
 
             // Phase 2: cumulative tokens for milestone celebration.

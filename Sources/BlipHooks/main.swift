@@ -74,6 +74,14 @@ struct BlipHooksCLI {
             if !flags.blipDisabled, toolName == "ExitPlanMode" {
                 forwardPlanApprovalNotice(json: json)
             }
+            // Heartbeat: every tool call keeps the session's lastPing
+            // fresh so long-running turns don't get marked stale.
+            // Firing this for EVERY tool (not just special ones) —
+            // Claude uses tools constantly during work so this is a
+            // reliable liveness signal.
+            if !flags.blipDisabled {
+                forwardHeartbeat(json: json)
+            }
             FileHandle.standardOutput.write(stdin)
             exit(0)
         }
@@ -203,6 +211,22 @@ struct BlipHooksCLI {
         }
     }
 
+    // MARK: - Heartbeat (pure liveness signal — no UI surface)
+
+    private static func forwardHeartbeat(json: [String: Any]) {
+        let pane = ProcessInfo.processInfo.environment["TMUX_PANE"].flatMap {
+            $0.isEmpty ? nil : $0
+        }
+        let beat = SessionHeartbeatEvent(
+            sessionId: (json["session_id"] as? String) ?? "",
+            cwd: (json["cwd"] as? String) ?? "",
+            tmuxPane: pane
+        )
+        // Fire-and-forget. 100ms cap — heartbeats are best-effort and
+        // we do NOT want to gate Claude's tool calls on blip's IPC.
+        try? BridgeClient.send(.event(.heartbeat(beat)), to: SocketPath.resolved(), timeout: 0.1)
+    }
+
     // MARK: - Side-effect dispatch per event
 
     private static func writeNotifFile(
@@ -216,7 +240,7 @@ struct BlipHooksCLI {
         case .stop:
             let raw = (json["last_assistant_message"] as? String) ?? ""
             message = raw.isEmpty
-                ? BlipConfigStore.load().stopFallbackMessage
+                ? BlipConfigStore.load().effectiveStopFallback
                 : HookSideEffects.trimForStatusline(raw)
         case .notification:
             message = (json["message"] as? String) ?? "Claude needs your attention"
@@ -229,13 +253,25 @@ struct BlipHooksCLI {
     // MARK: - Envelope construction (events only — commands built inline)
 
     private static func buildEventEnvelope(eventName: HookEventName, payload: Data) throws -> BridgeEnvelope {
+        // Captured once per hook run — the hook subprocess inherits the
+        // originating tmux pane's env from Claude Code. Empty string when
+        // the hook fires outside a tmux session.
+        let pane = ProcessInfo.processInfo.environment["TMUX_PANE"].flatMap {
+            $0.isEmpty ? nil : $0
+        }
         switch eventName {
         case .stop:
-            return .event(.stop(try JSONDecoder().decode(StopHookEvent.self, from: payload)))
+            var event = try JSONDecoder().decode(StopHookEvent.self, from: payload)
+            if event.tmuxPane == nil { event.tmuxPane = pane }
+            return .event(.stop(event))
         case .userPromptSubmit:
-            return .event(.userPromptSubmit(try JSONDecoder().decode(UserPromptSubmitEvent.self, from: payload)))
+            var event = try JSONDecoder().decode(UserPromptSubmitEvent.self, from: payload)
+            if event.tmuxPane == nil { event.tmuxPane = pane }
+            return .event(.userPromptSubmit(event))
         case .sessionStart:
-            return .event(.sessionStart(try JSONDecoder().decode(SessionStartEvent.self, from: payload)))
+            var event = try JSONDecoder().decode(SessionStartEvent.self, from: payload)
+            if event.tmuxPane == nil { event.tmuxPane = pane }
+            return .event(.sessionStart(event))
         case .notification:
             return .event(.notification(try JSONDecoder().decode(NotificationEvent.self, from: payload)))
         default:

@@ -27,7 +27,12 @@ final class JumpCoordinator {
     /// Switches the tmux client to the originating pane AND brings the
     /// host terminal app to the foreground.
     func jumpToOriginating() {
-        let cwd = (model.state == .stack ? model.focusedStackCwd : nil) ?? model.lastCwd
+        let cwd: String?
+        switch model.state {
+        case .stack:    cwd = model.focusedStackCwd ?? model.lastCwd
+        case .sessions: cwd = model.focusedSessionCwd ?? model.lastCwd
+        default:        cwd = model.lastCwd
+        }
         guard let cwd else {
             FileHandle.standardError.write(Data("[blip] jump: no cwd recorded yet\n".utf8))
             return

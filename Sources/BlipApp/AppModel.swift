@@ -29,9 +29,27 @@ final class AppModel: ObservableObject {
     /// Live count of working sessions. Drives the right-side badge.
     var liveSessionCount: Int { max(1, sessions.count(working: true)) }
 
+    /// True whenever any registered session is still generating — lets
+    /// the pet stay in "typing" regardless of which UI state the notch
+    /// is in (e.g. the user jumped to idle while Claude keeps working).
+    /// Backed by `sessions.activeIds`, which the periodic reconciler
+    /// computes from transcript mtime + pid liveness (not the fragile
+    /// hook state alone).
+    var anySessionWorking: Bool { !sessions.activeIds.isEmpty }
+
     /// The session registry — used for stack rendering and cross-session
     /// jump-to-tmux when multiple sessions are pinging concurrently.
     let sessions = SessionRegistry()
+
+    /// Forward SessionRegistry publishes (entries / activeIds changes)
+    /// up to AppModel so SwiftUI views observing only AppModel still
+    /// re-render when the registry changes — without making callers
+    /// observe both.
+    private var sessionsSubscription: AnyCancellable?
+    init() {
+        sessionsSubscription = sessions.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+    }
 
     // MARK: - Last-event bookkeeping
 
@@ -86,10 +104,20 @@ final class AppModel: ObservableObject {
 
     var isOpened: Bool {
         switch state {
-        case .preview, .expand, .question, .stack, .peek: return true
+        case .preview, .expand, .question, .stack, .peek, .sessions: return true
         default: return false
         }
     }
+
+    /// Snapshot of all tracked sessions (most recent ping first) for
+    /// rendering the `.sessions` overview. Unlike the stack state,
+    /// nothing is filtered — includes finished sessions and working
+    /// sessions with no completed turn yet.
+    var sessionsOverview: [SessionRegistry.Entry] {
+        sessions.entries.sorted { $0.lastPing > $1.lastPing }
+    }
+
+    @Published var focusedSessionIndex: Int = 0
     var hidesClosedSurfaceChrome: Bool { state == .dormant }
     var hasClosedPresence: Bool { !hidesClosedSurfaceChrome }
     var requiresAttention: Bool { state == .question }
@@ -148,11 +176,17 @@ final class AppModel: ObservableObject {
         state = .idle
     }
 
-    /// Used after a jump from preview/expand — removes the current
-    /// session from the registry (so it can't re-surface) and closes
-    /// the notch. Jump already happened; this is the cleanup.
+    /// Used after a jump from preview/expand — closes the notch and
+    /// removes the session from the registry so a subsequent event
+    /// doesn't re-stack it. Working sessions are NOT removed so the pet
+    /// can keep typing while Claude finishes generating in the
+    /// jumped-to terminal — the only way to get rid of that entry is
+    /// the session actually completing (Stop), which updates it in
+    /// place and keeps the re-surface behavior intact.
     func jumpDismiss() {
-        if let sid = lastSessionId {
+        if let sid = lastSessionId,
+           let entry = sessions.entry(forId: sid),
+           !entry.working {
             sessions.remove(sessionId: sid)
         }
         hardDismiss()
@@ -230,11 +264,36 @@ final class AppModel: ObservableObject {
             // when binding to ScrollViewReader, so we don't need to
             // know paragraph counts here.
             previewScrollAnchor = max(0, previewScrollAnchor + delta)
+        case .sessions:
+            let n = sessionsOverview.count
+            guard n > 0 else { return }
+            focusedSessionIndex = ((focusedSessionIndex + delta) % n + n) % n
         default:
             let n = displayedOptions.count
             guard n > 0 else { return }
             focusedOption = ((focusedOption + delta) % n + n) % n
         }
+    }
+
+    /// Toggle the sessions overview open/closed. When opening, focus is
+    /// reset to the top (most recent session).
+    func toggleSessionsOverview() {
+        if state == .sessions {
+            hardDismiss()
+            return
+        }
+        guard !sessionsOverview.isEmpty else { return }
+        focusedSessionIndex = 0
+        measuredPreviewHeight = 0
+        state = .sessions
+    }
+
+    /// Cwd of the currently focused session in `.sessions` — used by
+    /// the jump hotkey so Enter jumps to that pane's terminal.
+    var focusedSessionCwd: String? {
+        let list = sessionsOverview
+        guard !list.isEmpty else { return nil }
+        return list[min(focusedSessionIndex, list.count - 1)].cwd
     }
 
     /// Reset scroll anchor + measured height when a new preview lands.
@@ -309,7 +368,7 @@ final class AppModel: ObservableObject {
 
     // MARK: - Event ingress (called from BridgeListener)
 
-    func apply(stop event: StopHookEvent, lastText: String?, outputTokens: Int) {
+    func apply(stop event: StopHookEvent, lastText: String?, outputTokens: Int, suppressed: Bool = false) {
         let resolvedText = lastText ?? "(no assistant text in transcript yet)"
 
         // Token count arrives via applyTokenCount() later (slow on huge
@@ -319,8 +378,10 @@ final class AppModel: ObservableObject {
             cwd: event.cwd,
             transcriptPath: event.transcriptPath,
             lastTurnText: resolvedText,
+            tmuxPane: event.tmuxPane,
             cumulativeOutputTokens: outputTokens
         )
+        sessions.recomputeActivity()
         if milestoneCrossed { celebrate() }
 
         // ── Picker priority ───────────────────────────────────────────
@@ -329,6 +390,22 @@ final class AppModel: ObservableObject {
         // still recorded in the registry, so when the user resolves
         // the picker we can surface whatever stacked up.
         guard state != .question else { return }
+
+        // ── Focus suppression ─────────────────────────────────────────
+        // The user is already looking at this session's tmux pane on
+        // the active terminal — skip the notch surface so we don't
+        // interrupt work they're already watching. Registry still
+        // tracks the completion for future concurrent detection, and
+        // state flips back to idle so the pet doesn't stay in
+        // .working (UserPromptSubmit bumped it there, and we never
+        // reached the .preview transition below to clear it).
+        if suppressed {
+            FileHandle.standardError.write(Data(
+                "[AppModel] apply(stop) SUPPRESSED — pane=\(event.tmuxPane ?? "?") focused\n".utf8
+            ))
+            if state == .working { state = .idle }
+            return
+        }
 
         lastSessionId = event.sessionId
         lastCwd = event.cwd
@@ -355,11 +432,12 @@ final class AppModel: ObservableObject {
     }
 
     /// Surfaces a Notification event (e.g. Claude waiting on permission)
-    /// as a brief `.peek` with the message. Doesn't override more
-    /// important UI (picker, stack, preview, expand) — just records the
-    /// message in the registry so the user sees it when idle.
+    /// as a brief `.peek` with the message. Notifications mean
+    /// "Claude is waiting on the human" — NOT "Claude is working" —
+    /// so we don't flip the working flag. Just ensures the session
+    /// is in the registry so it's visible in the overview.
     func apply(notification event: NotificationEvent) {
-        sessions.recordPromptSubmit(sessionId: event.sessionId, cwd: event.cwd)
+        sessions.recordSessionStart(sessionId: event.sessionId, cwd: event.cwd)
         notificationMessage = event.message
         lastSessionId = event.sessionId
         lastCwd = event.cwd
@@ -397,8 +475,42 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// PreToolUse-derived liveness ping. Keeps the session's lastPing
+    /// fresh without touching any UI state — pet continues typing for
+    /// as long as Claude keeps using tools, regardless of timeout.
+    func apply(heartbeat event: SessionHeartbeatEvent) {
+        sessions.touch(
+            sessionId: event.sessionId,
+            cwd: event.cwd,
+            tmuxPane: event.tmuxPane
+        )
+        sessions.recomputeActivity()
+    }
+
+    /// SessionStart fires when a new Claude Code session opens. We
+    /// record an idle entry so the sessions overview surfaces it
+    /// before the user has prompted anything — otherwise a freshly-
+    /// opened pane doesn't appear until the first UserPromptSubmit.
+    /// No UI surface: `state` is untouched.
+    func apply(sessionStart event: SessionStartEvent) {
+        sessions.recordSessionStart(
+            sessionId: event.sessionId,
+            cwd: event.cwd,
+            tmuxPane: event.tmuxPane
+        )
+    }
+
     func apply(prompt: UserPromptSubmitEvent) {
-        sessions.recordPromptSubmit(sessionId: prompt.sessionId, cwd: prompt.cwd)
+        sessions.recordPromptSubmit(
+            sessionId: prompt.sessionId,
+            cwd: prompt.cwd,
+            tmuxPane: prompt.tmuxPane
+        )
+        // Immediate refresh so activeIds includes this session before
+        // the next periodic tick — otherwise the pet would briefly
+        // drop to idle when the user opens sessions overview between
+        // prompt and the first transcript write.
+        sessions.recomputeActivity()
 
         // Don't disturb an active picker. The other session can still
         // be "working" in the background — its registry entry tracks it.

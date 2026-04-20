@@ -348,6 +348,11 @@ enum PetFrames {
 struct Pet: View {
     var state: ShapeState
     var isCelebrating: Bool = false
+    /// True when any Claude session is still generating. Overrides passive
+    /// notch states (idle/preview/peek/stack) to keep the pet typing so
+    /// the user always sees activity when Claude is working — even while
+    /// reading a finished session's preview.
+    var anySessionWorking: Bool = false
     /// Width of the critter sprite itself; height derives from 12:8 aspect.
     var width: CGFloat = 28
     /// Horizontal traversal range (pt). Pet oscillates between x=0 and x=walkRange
@@ -357,10 +362,26 @@ struct Pet: View {
     var walkSpeed: CGFloat = 30
     /// Frames-per-second for leg animation.
     var walkFPS: Double = 6.0
+    /// Seconds the pet lingers at each edge of the walk range before
+    /// turning around. 0 = continuous pace (old behavior).
+    var edgeDwell: Double = 3.5
     var isAnimating: Bool = true
 
     private var cellSize: CGFloat { width / CGFloat(PetFrame.cols) }
     private var boxHeight: CGFloat { cellSize * CGFloat(PetFrame.height) }
+
+    /// Effective state the pet renders. When another session is still
+    /// generating, passive UI states fall through to `.working` so the
+    /// critter keeps typing regardless of which notch state is visible.
+    private var effectivePoseState: ShapeState {
+        guard anySessionWorking else { return state }
+        switch state {
+        case .idle, .preview, .expand, .peek, .stack, .sessions:
+            return .working
+        default:
+            return state
+        }
+    }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / walkFPS, paused: !shouldAnimate)) { ctx in
@@ -402,7 +423,7 @@ struct Pet: View {
             default: return .celebrateB
             }
         }
-        switch state {
+        switch effectivePoseState {
         case .dormant, .sleep:
             // Very slow snore — ~5.7s per breath (0.35 Hz flips ≈ real resting
             // breath rhythm). Z's drift, torso expands, legs stay planted.
@@ -411,21 +432,21 @@ struct Pet: View {
         case .idle, .preview, .expand:
             return resolveIdlePose(at: date)
         case .working:
-            // 12s typing loop with micro-breaks:
-            //   0.0–10.0s: alternate typingA/B at 3 Hz (tap-tap feel)
-            //   10.0–11.0s: typingSip (hand to face, coffee break beat)
-            //   11.0–11.8s: typingThink (thought bubble floats up)
-            let cycle = t.truncatingRemainder(dividingBy: 12.0)
-            if cycle >= 10.0 && cycle < 11.0 { return .typingSip }
-            if cycle >= 11.0 && cycle < 11.8 { return .typingThink }
-            let step = Int(t * 3.0)
+            // 10s typing loop with micro-breaks:
+            //   0.0–8.0s:  alternate typingA/B at 6 Hz (fast tap-tap)
+            //   8.0–9.0s:  typingSip (hand to face, coffee break)
+            //   9.0–10.0s: typingThink (thought bubble drifts up)
+            let cycle = t.truncatingRemainder(dividingBy: 10.0)
+            if cycle >= 8.0 && cycle < 9.0  { return .typingSip }
+            if cycle >= 9.0 && cycle < 10.0 { return .typingThink }
+            let step = Int(t * 6.0)
             return (step % 2 == 0) ? .typingA : .typingB
         case .question:
             // Slow thinking cadence — 0.8 Hz (~1.25s per pose). Frame A = eyes
             // open with ? bubble; frame B = eyes closed, ? drifted up-right.
             let step = Int(t * 0.8)
             return (step % 2 == 0) ? .thinkA : .thinkB
-        case .peek, .stack:
+        case .peek, .stack, .sessions:
             // Peek eyes pulse between squint (A) and closed-blink (B).
             let step = Int(t * 1.2)
             return (step % 2 == 0) ? .peekA : .peekB
@@ -495,16 +516,27 @@ struct Pet: View {
 
     private func resolveTraversal(at date: Date) -> (x: CGFloat, facingRight: Bool) {
         guard isWalking else { return (0, true) }
-        let period = Double((walkRange * 2) / walkSpeed)  // full round-trip seconds
-        let t = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period)
-        let half = period / 2
+        let half = Double(walkRange) / Double(walkSpeed)  // one-way walk duration
+        let dwell = max(0, edgeDwell)
+        let cycle = 2 * half + 2 * dwell                  // walk→dwell→walk→dwell
+        let t = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycle)
+
+        // Phase A: walking right (0 → walkRange)
         if t < half {
             let p = CGFloat(t / half)
             return (walkRange * p, true)
-        } else {
-            let p = CGFloat((t - half) / half)
+        }
+        // Phase B: dwelling at right edge (still facing right)
+        if t < half + dwell {
+            return (walkRange, true)
+        }
+        // Phase C: walking left (walkRange → 0)
+        if t < 2 * half + dwell {
+            let p = CGFloat((t - half - dwell) / half)
             return (walkRange * (1 - p), false)
         }
+        // Phase D: dwelling at left edge
+        return (0, false)
     }
 }
 

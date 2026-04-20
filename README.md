@@ -16,6 +16,8 @@ A macOS notch app for terminal-native [Claude Code](https://www.anthropic.com/cl
 
 - **Live preview** of Claude's last reply in the notch, with markdown (bold, italic, code, headers, bullets, quotes, fenced blocks, tables)
 - **Carousel stack** when multiple concurrent sessions finish within a 30-second window — navigate with ⌃⌥ J/K, jump to any with ⌃⌥ Enter
+- **Sessions overview** (⌃⌥ L) — pull-UI list of every live Claude session with working/idle status; seeds from a tmux+pid scan so pre-existing panes are visible immediately
+- **Focus-aware suppression** — events for the pane you're already watching don't interrupt you; other sessions still surface
 - **AskUserQuestion picker** intercepts the tool at the hook layer and lets you pick directly from the notch (⌃⌥ 1–8)
 - **Permission + plan-mode peeks** surface a calm notification above the closed pill
 - **Jump-to-tmux** on ⌃⌥ Enter — switches tmux session/window/pane to wherever the reply came from, then clears the notch
@@ -68,12 +70,15 @@ All chords use `⌃⌥` (Control+Option) as the base.
 |---|---|
 | `⌃⌥ Space` | expand preview → full reply (only when reply is truncated) |
 | `⌃⌥ Enter` | jump to originating tmux pane (or confirm picker option) |
-| `⌃⌥ Esc` | dismiss the notch |
+| `⌃⌥ X` | dismiss the notch (`⌃⌥ Esc` also works as a non-letter fallback) |
+| `⌃⌥ L` | toggle sessions overview |
 | `⌃⌥ 1`–`8` | direct pick during `AskUserQuestion` |
-| `⌃⌥ J` / `K` | cycle picker options or carousel cards |
+| `⌃⌥ J` / `K` | cycle picker options, carousel cards, or sessions overview |
 | `⌃⌥⇧ D` | cycle display target (laptop ↔ main ↔ auto) |
 
 `⌃⌥⇧ Enter` (with shift) is intentionally left unbound — recommended target for Rectangle.app's Maximize binding so it doesn't conflict.
+
+> Letters with macOS dead-key behavior (`A`, `C`, `E`, `I`, `N`, `O`, `U`) are swallowed by the input method for accent composition before global monitors see them — avoid those when rebinding.
 
 ---
 
@@ -106,7 +111,8 @@ Lives at `~/.config/blip/config.json`. Missing file or missing keys fall back to
   "socketPath":          null,
   "logLevel":            "info",
   "menuBarEnabled":      false,
-  "stopFallbackMessage": "Claude finished"
+  "stopFallbackMessage": "",
+  "personalName":        "elpabl0"
 }
 ```
 
@@ -116,7 +122,8 @@ Lives at `~/.config/blip/config.json`. Missing file or missing keys fall back to
 | `socketPath` | absolute path or `null` | Override the default Unix socket location. |
 | `logLevel` | `debug` \| `info` \| `warn` \| `error` | Stderr verbosity. |
 | `menuBarEnabled` | `true` \| `false` | Show a menu-bar item for quick display switching. |
-| `stopFallbackMessage` | any string | Written to `/tmp/claude-notif-msg.txt` when Claude's reply is empty. Consumed by tmux statusline scripts. |
+| `stopFallbackMessage` | any string (empty = derive from `personalName`) | Written to `/tmp/claude-notif-msg.txt` when Claude's reply is empty. Consumed by tmux statusline scripts. |
+| `personalName` | any string | Your display name. Used to compose the default stop fallback as `"{personalName}, your turn"` when `stopFallbackMessage` is empty. |
 
 ---
 

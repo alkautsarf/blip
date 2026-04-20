@@ -3,7 +3,10 @@
 //
 //   ⌃⌥ Space     → expand / collapse (state-aware)
 //   ⌃⌥ Enter     → jump to tmux / confirm pick (state-aware)
-//   ⌃⌥ Esc       → dismiss to .idle
+//   ⌃⌥ X / ⌃⌥ Esc → dismiss to .idle (letter is primary; Esc is
+//                    the non-letter fallback. Avoid A/C/E/I/N/O/U —
+//                    those are macOS dead keys for accent input.)
+//   ⌃⌥ L         → toggle sessions overview
 //   ⌃⌥ 1…8       → pick option (during .question) / jump to session (during .stack)
 //   ⌃⌥ J / K     → focus ring move
 //   ⌃⌥⇧ D        → cycle display target
@@ -43,10 +46,10 @@ final class HotkeyRouter {
                 model.confirmPick()
             } else {
                 onJumpToTmux()
-                if model.state == .stack {
-                    model.collapseFocusedFromStack()
-                } else {
-                    model.jumpDismiss()
+                switch model.state {
+                case .stack:    model.collapseFocusedFromStack()
+                case .sessions: model.hardDismiss()
+                default:        model.jumpDismiss()
                 }
             }
             return
@@ -69,14 +72,21 @@ final class HotkeyRouter {
             }
             return
         }
-        // ⌃⌥ Esc → hard dismiss (explicit user close, no recovery)
-        if keyCode == 53 {
+        // Dismiss: ⌃⌥ X (keyCode 7) primary, ⌃⌥ Esc (keyCode 53) fallback.
+        // X is safe because it isn't a macOS accent dead key (C/E/I/N/U
+        // would be swallowed by the input method before reaching us).
+        if !isShift, keyCode == 7 || keyCode == 53 || chars == "x" {
             model.hardDismiss()
             return
         }
         // ⌃⌥⇧ D → cycle display target
         if chars == "d" && isShift {
             onCycleDisplay()
+            return
+        }
+        // ⌃⌥ L → toggle sessions overview (list live sessions + state)
+        if chars == "l" && !isShift {
+            model.toggleSessionsOverview()
             return
         }
         // ⌃⌥ J / K → focus ring (no shift; shift is reserved for display chord)
@@ -98,8 +108,6 @@ final class HotkeyRouter {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let isShift = mods.contains(.shift)
         switch chars {
-        case "c":
-            model.celebrate(); return true
         case "h":
             model.hovering.toggle(); return true
         case "d" where isShift:

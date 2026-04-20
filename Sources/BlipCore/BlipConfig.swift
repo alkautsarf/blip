@@ -25,14 +25,20 @@ public struct BlipConfig: Codable, Equatable, Sendable {
     /// Message written to `/tmp/claude-notif-msg.txt` when a Stop hook
     /// fires without a visible assistant reply. Consumed by tmux
     /// statusline scripts. Truncated to ~60 chars for the one-line pane.
+    /// Empty string → derive from `personalName` as "{name}, your turn".
     public var stopFallbackMessage: String
+
+    /// Display name used in the default stop fallback ("{personalName},
+    /// your turn"). Only consulted when `stopFallbackMessage` is empty.
+    public var personalName: String
 
     public static let `default` = BlipConfig(
         display: "main",
         socketPath: nil,
         logLevel: "info",
         menuBarEnabled: false,
-        stopFallbackMessage: "Claude finished"
+        stopFallbackMessage: "",
+        personalName: "elpabl0"
     )
 
     public init(
@@ -40,18 +46,27 @@ public struct BlipConfig: Codable, Equatable, Sendable {
         socketPath: String?,
         logLevel: String,
         menuBarEnabled: Bool = false,
-        stopFallbackMessage: String = "Claude finished"
+        stopFallbackMessage: String = "",
+        personalName: String = "elpabl0"
     ) {
         self.display = display
         self.socketPath = socketPath
         self.logLevel = logLevel
         self.menuBarEnabled = menuBarEnabled
         self.stopFallbackMessage = stopFallbackMessage
+        self.personalName = personalName
     }
 
-    // Backward-compatible decode for configs missing newer fields.
+    /// Resolves the stop fallback: explicit message wins, otherwise
+    /// compose from personalName.
+    public var effectiveStopFallback: String {
+        stopFallbackMessage.isEmpty
+            ? "\(personalName), your turn"
+            : stopFallbackMessage
+    }
+
     enum CodingKeys: String, CodingKey {
-        case display, socketPath, logLevel, menuBarEnabled, stopFallbackMessage
+        case display, socketPath, logLevel, menuBarEnabled, stopFallbackMessage, personalName
     }
 
     public init(from decoder: Decoder) throws {
@@ -60,7 +75,8 @@ public struct BlipConfig: Codable, Equatable, Sendable {
         socketPath          = try c.decodeIfPresent(String.self, forKey: .socketPath)
         logLevel            = try c.decodeIfPresent(String.self, forKey: .logLevel) ?? "info"
         menuBarEnabled      = try c.decodeIfPresent(Bool.self, forKey: .menuBarEnabled) ?? false
-        stopFallbackMessage = try c.decodeIfPresent(String.self, forKey: .stopFallbackMessage) ?? "Claude finished"
+        stopFallbackMessage = try c.decodeIfPresent(String.self, forKey: .stopFallbackMessage) ?? ""
+        personalName        = try c.decodeIfPresent(String.self, forKey: .personalName) ?? "elpabl0"
     }
 }
 
@@ -108,6 +124,7 @@ public enum BlipConfigStore {
         case "logLevel":            return config.logLevel
         case "menuBarEnabled":      return config.menuBarEnabled ? "true" : "false"
         case "stopFallbackMessage": return config.stopFallbackMessage
+        case "personalName":        return config.personalName
         default:                    return nil
         }
     }
@@ -130,13 +147,19 @@ public enum BlipConfigStore {
             default: return false
             }
         case "stopFallbackMessage":
-            guard !value.isEmpty else { return false }
+            // Empty clears the override and reverts to personalName-derived default.
             config.stopFallbackMessage = value
+        case "personalName":
+            guard !value.isEmpty else { return false }
+            config.personalName = value
         default:
             return false
         }
         return true
     }
 
-    public static let validKeys = ["display", "socketPath", "logLevel", "menuBarEnabled", "stopFallbackMessage"]
+    public static let validKeys = [
+        "display", "socketPath", "logLevel", "menuBarEnabled",
+        "stopFallbackMessage", "personalName",
+    ]
 }

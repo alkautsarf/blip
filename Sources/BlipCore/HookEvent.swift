@@ -26,6 +26,11 @@ public struct StopHookEvent: Codable, Sendable {
     /// payloads (since ~mid-2026). Authoritative when present — skips
     /// the transcript-tail race on fresh turns.
     public let lastAssistantMessage: String?
+    /// tmux pane id (e.g. "%42") captured from `$TMUX_PANE` by the hook
+    /// subprocess. Nil when the hook is fired outside tmux. Used by the
+    /// app to check whether the user is currently looking at this
+    /// session's pane (focus-aware notch suppression).
+    public var tmuxPane: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionId       = "session_id"
@@ -34,6 +39,7 @@ public struct StopHookEvent: Codable, Sendable {
         case hookEventName   = "hook_event_name"
         case stopHookActive  = "stop_hook_active"
         case lastAssistantMessage = "last_assistant_message"
+        case tmuxPane        = "tmux_pane"
     }
 
     public init(
@@ -42,7 +48,8 @@ public struct StopHookEvent: Codable, Sendable {
         cwd: String,
         hookEventName: HookEventName = .stop,
         stopHookActive: Bool = false,
-        lastAssistantMessage: String? = nil
+        lastAssistantMessage: String? = nil,
+        tmuxPane: String? = nil
     ) {
         self.sessionId = sessionId
         self.transcriptPath = transcriptPath
@@ -50,6 +57,7 @@ public struct StopHookEvent: Codable, Sendable {
         self.hookEventName = hookEventName
         self.stopHookActive = stopHookActive
         self.lastAssistantMessage = lastAssistantMessage
+        self.tmuxPane = tmuxPane
     }
 }
 
@@ -57,13 +65,17 @@ public struct UserPromptSubmitEvent: Codable, Sendable {
     public let sessionId: String
     public let cwd: String
     public let prompt: String
+    /// tmux pane id from `$TMUX_PANE`; nil outside tmux.
+    public var tmuxPane: String?
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case cwd
         case prompt
+        case tmuxPane  = "tmux_pane"
     }
-    public init(sessionId: String, cwd: String, prompt: String) {
+    public init(sessionId: String, cwd: String, prompt: String, tmuxPane: String? = nil) {
         self.sessionId = sessionId; self.cwd = cwd; self.prompt = prompt
+        self.tmuxPane = tmuxPane
     }
 }
 
@@ -71,13 +83,17 @@ public struct SessionStartEvent: Codable, Sendable {
     public let sessionId: String
     public let cwd: String
     public let source: String?
+    /// tmux pane id from `$TMUX_PANE`; nil outside tmux.
+    public var tmuxPane: String?
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case cwd
         case source
+        case tmuxPane  = "tmux_pane"
     }
-    public init(sessionId: String, cwd: String, source: String? = nil) {
+    public init(sessionId: String, cwd: String, source: String? = nil, tmuxPane: String? = nil) {
         self.sessionId = sessionId; self.cwd = cwd; self.source = source
+        self.tmuxPane = tmuxPane
     }
 }
 
@@ -92,6 +108,26 @@ public struct NotificationEvent: Codable, Sendable {
     }
     public init(sessionId: String, cwd: String, message: String) {
         self.sessionId = sessionId; self.cwd = cwd; self.message = message
+    }
+}
+
+/// Lightweight "still alive" ping synthesized by the hook CLI from
+/// PreToolUse (every tool invocation). Keeps the session's lastPing
+/// fresh so staleness logic doesn't mark a long-running turn as idle.
+/// No payload beyond session identity — we never surface this in the UI.
+public struct SessionHeartbeatEvent: Codable, Sendable {
+    public let sessionId: String
+    public let cwd: String
+    public var tmuxPane: String?
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case cwd
+        case tmuxPane  = "tmux_pane"
+    }
+    public init(sessionId: String, cwd: String, tmuxPane: String? = nil) {
+        self.sessionId = sessionId
+        self.cwd = cwd
+        self.tmuxPane = tmuxPane
     }
 }
 

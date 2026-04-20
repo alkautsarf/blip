@@ -246,9 +246,13 @@ enum ConfigCmd {
             let cfg = BlipConfigStore.load()
             let path = BlipConfigStore.defaultPath()
             Swift.print("config file: \(path.path)\(FileManager.default.fileExists(atPath: path.path) ? "" : " (defaults — not yet written)")")
-            Swift.print("  display:    \(cfg.display)")
-            Swift.print("  socketPath: \(cfg.socketPath ?? "(default)")")
-            Swift.print("  logLevel:   \(cfg.logLevel)")
+            let keyWidth = BlipConfigStore.validKeys.map(\.count).max() ?? 0
+            for key in BlipConfigStore.validKeys {
+                let v = BlipConfigStore.value(of: key, in: cfg) ?? ""
+                let display = v.isEmpty ? "(default)" : v
+                let padded = key.padding(toLength: keyWidth, withPad: " ", startingAt: 0)
+                Swift.print("  \(padded)  \(display)")
+            }
 
         case "get":
             guard args.count >= 2 else {

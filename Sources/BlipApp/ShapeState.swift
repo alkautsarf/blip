@@ -12,6 +12,7 @@ public enum ShapeState: Int, CaseIterable, Sendable {
     case expand
     case question
     case stack
+    case sessions
     case sleep
 
     public var label: String {
@@ -24,6 +25,7 @@ public enum ShapeState: Int, CaseIterable, Sendable {
         case .expand:   return "expand"
         case .question: return "question"
         case .stack:    return "stack"
+        case .sessions: return "sessions"
         case .sleep:    return "sleep"
         }
     }

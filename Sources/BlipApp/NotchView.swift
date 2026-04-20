@@ -7,9 +7,20 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Spring tunings
-private let openSpring  = Animation.spring(response: 0.42, dampingFraction: 0.8, blendDuration: 0)
-private let closeSpring = Animation.smooth(duration: 0.3)
+// MARK: - Motion curves
+// Cohesive tuning so every transition reads like the same device —
+// the surface, its contents, and card navigation all share a family of
+// spring responses instead of a mix of springs + ease curves.
+private enum Motion {
+    /// Notch surface open/close — snappy with a touch of overshoot.
+    static let surface  = Animation.spring(response: 0.44, dampingFraction: 0.82, blendDuration: 0)
+    /// Content swap inside the opened body (state changes, text swap).
+    static let content  = Animation.spring(response: 0.36, dampingFraction: 0.90, blendDuration: 0)
+    /// Carousel / dots indicator navigation.
+    static let carousel = Animation.spring(response: 0.40, dampingFraction: 0.86, blendDuration: 0)
+    /// Measured-height adjustments (expand/collapse, new content).
+    static let resize   = Animation.spring(response: 0.34, dampingFraction: 0.90, blendDuration: 0)
+}
 
 /// Carries the body's measured height up the view tree so the panel
 /// surface can size to the actual content instead of an over-estimate.
@@ -48,9 +59,7 @@ struct NotchView: View {
     @ObservedObject var model: AppModel
     @Namespace private var notchNamespace
 
-    private var transitionAnimation: Animation {
-        model.isOpened ? openSpring : closeSpring
-    }
+    private var transitionAnimation: Animation { Motion.surface }
 
     var body: some View {
         let dims = currentDims()
@@ -142,6 +151,7 @@ struct NotchView: View {
                     Pet(
                         state: model.state,
                         isCelebrating: model.celebrating,
+                        anySessionWorking: model.anySessionWorking,
                         width: 28,
                         walkRange: idlePetWalkRange,
                         walkSpeed: 32
@@ -150,7 +160,7 @@ struct NotchView: View {
                     // pill opens, the opened-header pet becomes the source so
                     // SwiftUI doesn't render both during the spring animation.
                     .matchedGeometryEffect(id: "island-icon", in: notchNamespace, isSource: !model.isOpened)
-                    if model.state == .working {
+                    if model.state == .working || model.anySessionWorking {
                         Laptop()
                     }
                 }
@@ -180,12 +190,23 @@ struct NotchView: View {
 
     private var openedHeader: some View {
         HStack(spacing: 10) {
-            Pet(state: model.state, isCelebrating: model.celebrating, width: 28)
+            HStack(alignment: .bottom, spacing: 0) {
+                Pet(
+                    state: model.state,
+                    isCelebrating: model.celebrating,
+                    anySessionWorking: model.anySessionWorking,
+                    width: 28
+                )
                 .matchedGeometryEffect(id: "island-icon", in: notchNamespace, isSource: model.isOpened)
+                if model.state == .working || model.anySessionWorking {
+                    Laptop()
+                }
+            }
             Text(openedHeaderText)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
-                .animation(.easeOut(duration: 0.18), value: openedHeaderText)
+                .contentTransition(.opacity)
+                .animation(Motion.content, value: openedHeaderText)
             Spacer()
             if model.state == .stack, model.stackEntries.count > 1 {
                 stackDotsIndicator
@@ -212,6 +233,7 @@ struct NotchView: View {
             let idx = min(model.focusedStackEntry, entries.count - 1)
             return entries[idx].sessionTag
         case .peek:             return "\(model.sessionTag) · notif"
+        case .sessions:         return "sessions · \(model.sessionsOverview.count)"
         default:                return ""
         }
     }
@@ -227,7 +249,7 @@ struct NotchView: View {
                           : Color.white.opacity(0.25))
                     .frame(width: 6, height: 6)
                     .scaleEffect(idx == model.focusedStackEntry ? 1.3 : 1.0)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: model.focusedStackEntry)
+                    .animation(Motion.carousel, value: model.focusedStackEntry)
             }
         }
     }
@@ -250,18 +272,121 @@ struct NotchView: View {
 
     @ViewBuilder
     private func openedContent(dims: Dims) -> some View {
-        switch model.state {
-        case .preview, .expand:
-            previewBody(expanded: model.state == .expand)
-        case .question:
-            questionBody
-        case .stack:
-            stackBody
-        case .peek:
-            peekBody
-        default:
-            Color.clear
+        // Each body gets its own id so SwiftUI can animate the swap via
+        // the asymmetric transition below instead of hard-replacing.
+        Group {
+            switch model.state {
+            case .preview, .expand:
+                previewBody(expanded: model.state == .expand)
+                    .id("preview-\(model.state == .expand ? "full" : "snippet")")
+            case .question:
+                questionBody.id("question")
+            case .stack:
+                stackBody.id("stack-\(model.focusedStackEntry)")
+            case .peek:
+                peekBody.id("peek")
+            case .sessions:
+                sessionsBody.id("sessions")
+            default:
+                Color.clear.id("empty")
+            }
         }
+        .transition(.asymmetric(
+            insertion: .opacity.combined(with: .offset(y: 6)),
+            removal:   .opacity.combined(with: .offset(y: -4))
+        ))
+        .animation(Motion.content, value: model.state)
+        .animation(Motion.carousel, value: model.focusedStackEntry)
+    }
+
+    private var sessionsBody: some View {
+        let list = model.sessionsOverview
+        let focusedIdx = min(model.focusedSessionIndex, max(0, list.count - 1))
+        return VStack(alignment: .leading, spacing: 2) {
+            if list.isEmpty {
+                Text("no sessions yet")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(Array(list.enumerated()), id: \.element.id) { idx, entry in
+                    sessionRow(entry: entry, focused: idx == focusedIdx)
+                        .contentShape(Rectangle())
+                }
+                .animation(Motion.carousel, value: model.focusedSessionIndex)
+            }
+            Text(list.count > 1
+                 ? "⌃⌥ J/K navigate · ⌃⌥ Enter jump · ⌃⌥ X dismiss"
+                 : "⌃⌥ Enter jump · ⌃⌥ X dismiss")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+                .padding(.top, 6)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
+    }
+
+    private func sessionRow(entry: SessionRegistry.Entry, focused: Bool) -> some View {
+        let status = sessionStatus(entry: entry)
+        return HStack(spacing: 10) {
+            Circle()
+                .fill(status.color)
+                .frame(width: 7, height: 7)
+                .overlay(
+                    Circle()
+                        .stroke(status.color.opacity(0.35), lineWidth: 2)
+                        .scaleEffect(status.pulsing ? 1.6 : 1.0)
+                        .opacity(status.pulsing ? 0.7 : 0)
+                )
+            Text(entry.sessionTag)
+                .font(.system(size: 13, weight: focused ? .semibold : .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(focused ? 1.0 : 0.72))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+            Text(status.label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(status.color.opacity(focused ? 0.95 : 0.75))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(focused
+                      ? Color.white.opacity(0.07)
+                      : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(focused
+                        ? Color(red: 0.45, green: 0.95, blue: 0.62).opacity(0.35)
+                        : Color.clear, lineWidth: 1)
+        )
+    }
+
+    private struct SessionStatus {
+        let color: Color
+        let label: String
+        /// True for working sessions — adds a soft pulse to draw the eye.
+        let pulsing: Bool
+    }
+
+    private func sessionStatus(entry: SessionRegistry.Entry) -> SessionStatus {
+        let inputGreen = Color(red: 0.45, green: 0.95, blue: 0.62)
+        let softBlue   = Color(red: 0.55, green: 0.78, blue: 1.0)
+        // activeIds is authoritative — populated by the periodic
+        // reconciler from transcript mtime + pid liveness (not the
+        // fragile hook state alone).
+        if model.sessions.activeIds.contains(entry.id) {
+            return SessionStatus(color: inputGreen, label: "working", pulsing: true)
+        }
+        return SessionStatus(
+            color: softBlue.opacity(0.85),
+            label: entry.lastTurnText.isEmpty ? "idle" : "done",
+            pulsing: false
+        )
     }
 
     private var peekBody: some View {
@@ -285,9 +410,9 @@ struct NotchView: View {
 
     private var peekFooterText: String {
         if model.lastCwd != nil {
-            return "⌃⌥ Enter to jump · ⌃⌥ Esc to dismiss"
+            return "⌃⌥ Enter to jump · ⌃⌥ X to dismiss"
         }
-        return "⌃⌥ Esc to dismiss"
+        return "⌃⌥ X to dismiss"
     }
 
     private func previewBody(expanded: Bool) -> some View {
@@ -327,8 +452,9 @@ struct NotchView: View {
                 }
                 .frame(height: scrollHeight)
                 .id(body)
+                .animation(Motion.resize, value: scrollHeight)
                 .onChange(of: clampedAnchor) { _, target in
-                    withAnimation(.easeOut(duration: 0.18)) {
+                    withAnimation(Motion.content) {
                         proxy.scrollTo(target, anchor: .top)
                     }
                 }
@@ -337,18 +463,18 @@ struct NotchView: View {
             // Always surface jump at minimum; add scroll/expand hints when applicable.
             if needsScroll && model.canExpand {
                 Text(expanded
-                     ? "⌃⌥ J/K scroll · ⌃⌥ Enter jump · ⌃⌥ Esc dismiss"
+                     ? "⌃⌥ J/K scroll · ⌃⌥ Enter jump · ⌃⌥ X dismiss"
                      : "⌃⌥ J/K scroll · ⌃⌥ Space expand · ⌃⌥ Enter jump")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.45))
             } else if needsScroll {
                 Text(expanded
-                     ? "⌃⌥ J/K scroll · ⌃⌥ Enter jump · ⌃⌥ Esc dismiss"
+                     ? "⌃⌥ J/K scroll · ⌃⌥ Enter jump · ⌃⌥ X dismiss"
                      : "⌃⌥ J/K scroll · ⌃⌥ Enter jump")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.45))
             } else if expanded {
-                Text("⌃⌥ Enter to jump · ⌃⌥ Esc to dismiss")
+                Text("⌃⌥ Enter to jump · ⌃⌥ X to dismiss")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
             } else if model.canExpand {
@@ -356,7 +482,7 @@ struct NotchView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
             } else {
-                Text("⌃⌥ Enter to jump · ⌃⌥ Esc to dismiss")
+                Text("⌃⌥ Enter to jump · ⌃⌥ X to dismiss")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
             }
@@ -772,6 +898,7 @@ struct NotchView: View {
                     .measuringHeight(into: model)
                 }
                 .frame(height: textHeight)
+                .animation(Motion.resize, value: textHeight)
                 .padding(.bottom, 4)
             }
             ForEach(Array(options.enumerated()), id: \.offset) { idx, opt in
@@ -791,8 +918,9 @@ struct NotchView: View {
                         .foregroundStyle(.white.opacity(idx == model.focusedOption ? 1.0 : 0.7))
                 }
             }
+            .animation(Motion.content, value: model.focusedOption)
             if model.currentQuestion != nil {
-                Text("⌃⌥ 1–\(options.count) pick · J/K cycle · Enter confirm · Esc dismiss")
+                Text("⌃⌥ 1–\(options.count) pick · J/K cycle · Enter confirm · ⌃⌥ X dismiss")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
                     .padding(.top, 6)
@@ -843,10 +971,12 @@ struct NotchView: View {
                 .measuringHeight(into: model)
             }
             .frame(height: scrollHeight)
+            .animation(Motion.resize, value: scrollHeight)
 
             Text(stackFooterText(needsScroll: needsScroll, canExpand: canExpand, expanded: model.stackExpanded))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.white.opacity(0.45))
+                .contentTransition(.opacity)
         }
         .padding(.horizontal, 4)
         .padding(.top, 6)
@@ -861,7 +991,7 @@ struct NotchView: View {
             parts.append(expanded ? "⌃⌥ Space collapse" : "⌃⌥ Space full reply")
         }
         parts.append("⌃⌥ Enter jump")
-        parts.append("⌃⌥ Esc dismiss")
+        parts.append("⌃⌥ X dismiss")
         return parts.joined(separator: " · ")
     }
 
@@ -906,9 +1036,11 @@ struct NotchView: View {
     /// Idle wandering range — full pill width on all displays. On notched
     /// Macs the pet passes behind the hardware cutout and reappears on
     /// the other side (a tunnel effect). The session tag + badge hide in
-    /// idle so the full lane is free.
+    /// idle so the full lane is free. Suppressed whenever any session is
+    /// still working so the pet stays at the laptop instead of walking
+    /// while typing.
     private var idlePetWalkRange: CGFloat {
-        guard model.state == .idle else { return 0 }
+        guard model.state == .idle && !model.anySessionWorking else { return 0 }
         return Self.closedPetWalkRange(for: model)
     }
 

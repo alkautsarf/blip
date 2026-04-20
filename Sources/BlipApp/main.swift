@@ -14,6 +14,20 @@ final class BlipAppDelegate: NSObject, NSApplicationDelegate {
     private var listener: BridgeListener!
     private var jump: JumpCoordinator!
     private var menuBar: MenuBarController!
+    private var paneScanTimer: Timer?
+
+    private func reconcileSessions() {
+        let registry = model.sessions
+        Task.detached(priority: .utility) {
+            let panes = ClaudePaneScan.claudePanes().map {
+                (paneId: $0.paneId, pid: $0.pid, cwd: $0.cwd)
+            }
+            await MainActor.run {
+                registry.reconcileFromScan(panes)
+                registry.recomputeActivity()
+            }
+        }
+    }
 
     private var displayTarget: DisplayTarget {
         get {
@@ -88,6 +102,16 @@ final class BlipAppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
+        // PID + filesystem session reconcile: scans tmux+ps for live
+        // panes, reconciles registry, then stats each transcript file
+        // to recompute activeIds. Gives us OS-level ground truth so
+        // the pet reflects reality even when hooks get dropped.
+        // Ticks every 3s to match the transcript-active window.
+        reconcileSessions()
+        paneScanTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reconcileSessions() }
+        }
+
         // Menu-bar item is opt-in (blip config set menuBarEnabled true).
         if BlipConfigStore.load().menuBarEnabled {
             menuBar = MenuBarController(
@@ -110,6 +134,7 @@ final class BlipAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         listener?.stop()
         hotkeys?.stop()
+        paneScanTimer?.invalidate()
     }
 
     private func observeScreenChanges() {
@@ -147,7 +172,8 @@ final class BlipAppDelegate: NSObject, NSApplicationDelegate {
         Global hotkeys (require Accessibility permission):
           ⌃⌥ Space     — expand / collapse (state-aware)
           ⌃⌥ Enter     — jump to tmux pane / confirm pick (state-aware)
-          ⌃⌥ Esc       — dismiss
+          ⌃⌥ X         — dismiss (close notch); ⌃⌥ Esc also works
+          ⌃⌥ L         — toggle sessions overview
           ⌃⌥ 1..8      — pick option / jump to state (in dev)
           ⌃⌥ J / K     — focus ring
           ⌃⌥⇧ D        — cycle display target

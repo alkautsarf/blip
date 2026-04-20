@@ -21,12 +21,13 @@ public enum HookPayload: Codable, Sendable {
     case userPromptSubmit(UserPromptSubmitEvent)
     case sessionStart(SessionStartEvent)
     case notification(NotificationEvent)
+    case heartbeat(SessionHeartbeatEvent)
     case askUserQuestion(AskUserQuestionRequest)
     case askUserQuestionResponse(AskUserQuestionResponse)
 
     private enum CodingKeys: String, CodingKey { case kind, payload }
     private enum Kind: String, Codable {
-        case stop, userPromptSubmit, sessionStart, notification
+        case stop, userPromptSubmit, sessionStart, notification, heartbeat
         case askUserQuestion, askUserQuestionResponse
     }
 
@@ -41,6 +42,8 @@ public enum HookPayload: Codable, Sendable {
             try c.encode(Kind.sessionStart, forKey: .kind);        try c.encode(v, forKey: .payload)
         case .notification(let v):
             try c.encode(Kind.notification, forKey: .kind);        try c.encode(v, forKey: .payload)
+        case .heartbeat(let v):
+            try c.encode(Kind.heartbeat, forKey: .kind);           try c.encode(v, forKey: .payload)
         case .askUserQuestion(let v):
             try c.encode(Kind.askUserQuestion, forKey: .kind);     try c.encode(v, forKey: .payload)
         case .askUserQuestionResponse(let v):
@@ -60,6 +63,8 @@ public enum HookPayload: Codable, Sendable {
             self = .sessionStart(try c.decode(SessionStartEvent.self, forKey: .payload))
         case .notification:
             self = .notification(try c.decode(NotificationEvent.self, forKey: .payload))
+        case .heartbeat:
+            self = .heartbeat(try c.decode(SessionHeartbeatEvent.self, forKey: .payload))
         case .askUserQuestion:
             self = .askUserQuestion(try c.decode(AskUserQuestionRequest.self, forKey: .payload))
         case .askUserQuestionResponse:
