@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>blip.vim — notch app for Claude Code</title>
+    <meta name="description" content="Surface Claude Code's last turn, an animated walking pet, and AskUserQuestion pickers — all in your Mac notch, without leaving tmux.">
+    <style>
+        :root { color-scheme: dark; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif; background: #0a0a0a; color: #f0f0f0; line-height: 1.6; }
+        main { max-width: 720px; margin: 0 auto; padding: 80px 24px; }
+        h1 { font-size: 56px; font-weight: 700; letter-spacing: -1.5px; margin-bottom: 12px; }
+        .tagline { font-size: 18px; opacity: 0.7; margin-bottom: 48px; }
+        .demo { background: #1a1a1a; border-radius: 12px; padding: 24px; margin-bottom: 48px; font-family: "SF Mono", Menlo, monospace; font-size: 13px; line-height: 1.5; color: #e0e0e0; }
+        .demo .accent { color: #f08060; }
+        h2 { font-size: 28px; font-weight: 600; margin: 48px 0 16px; letter-spacing: -0.5px; }
+        ul { list-style: none; }
+        li { padding: 8px 0; opacity: 0.85; }
+        li::before { content: "·"; padding-right: 12px; opacity: 0.5; }
+        pre { background: #1a1a1a; border-radius: 8px; padding: 16px 20px; overflow-x: auto; font-family: "SF Mono", Menlo, monospace; font-size: 13px; margin: 16px 0; }
+        code { color: #f08060; }
+        .install pre { font-size: 14px; }
+        a { color: #f08060; text-decoration: none; border-bottom: 1px solid rgba(240, 128, 96, 0.3); }
+        a:hover { border-bottom-color: #f08060; }
+        footer { margin-top: 80px; padding-top: 24px; border-top: 1px solid #1a1a1a; opacity: 0.5; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>blip.vim</h1>
+        <p class="tagline">Surface Claude Code's last turn, walking pet, and option pickers — all in your Mac notch.</p>
+
+        <div class="demo">
+            <span class="accent">┌──── blip.vim · pick ────┐</span><br>
+            <span class="accent">│</span>  Which path do you want?<br>
+            <span class="accent">│</span>  <span style="background: #4ad06b; color: #000; padding: 0 6px; border-radius: 3px;">1</span> ship it now<br>
+            <span class="accent">│</span>  <span style="background: #2a2a2a; padding: 0 6px; border-radius: 3px;">2</span> add tests first<br>
+            <span class="accent">│</span>  <span style="background: #2a2a2a; padding: 0 6px; border-radius: 3px;">3</span> back out<br>
+            <span class="accent">└──────────────────────────┘</span>
+        </div>
+
+        <h2>For terminal-native devs</h2>
+        <ul>
+            <li>Never leave tmux to answer Claude's <code>AskUserQuestion</code></li>
+            <li><code>⌃⌥⇧ Enter</code> jumps to the originating tmux pane</li>
+            <li>Vim keys (<code>j</code>/<code>k</code>) cycle options</li>
+            <li>Multi-session stack when 2+ sessions ping concurrently</li>
+            <li>Animated walking pet — claude-alive ambient presence</li>
+        </ul>
+
+        <h2>Install</h2>
+        <div class="install">
+            <pre>brew tap alkautsarf/tap
+brew install blip.vim
+blip start
+blip install</pre>
+        </div>
+
+        <h2>Source</h2>
+        <p>MIT licensed. Code at <a href="https://github.com/alkautsarf/blip.vim">github.com/alkautsarf/blip.vim</a>.</p>
+
+        <footer>
+            built by <a href="https://github.com/alkautsarf">elpabl0</a> · 2026
+        </footer>
+    </main>
+</body>
+</html>

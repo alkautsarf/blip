@@ -1,0 +1,38 @@
+<?xml version="1.0" standalone="yes"?>
+<!--
+  Sparkle appcast for blip.vim auto-updates. Hosted at https://blipv.im/appcast.xml.
+  Add a new <item> per release; sign the artifact with the EdDSA private key
+  before publishing (see Sparkle docs for `generate_appcast`).
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>blip.vim</title>
+        <link>https://blipv.im/appcast.xml</link>
+        <description>Most recent blip.vim updates</description>
+        <language>en</language>
+
+        <item>
+            <title>blip.vim 0.1.0</title>
+            <pubDate>Mon, 20 Apr 2026 10:00:00 +0000</pubDate>
+            <sparkle:version>0.1.0</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h2>Initial release</h2>
+                <ul>
+                    <li>Notch surfaces last assistant turn</li>
+                    <li>AskUserQuestion picker with vim-style selection</li>
+                    <li>Plan-mode picker</li>
+                    <li>Multi-session stack</li>
+                    <li>Walking pet animation suite</li>
+                    <li>Token milestone celebrations</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://blipv.im/releases/blip.vim-0.1.0.dmg"
+                length="0"
+                type="application/octet-stream"
+                sparkle:edSignature="REPLACE_WITH_EDDSA_SIGNATURE" />
+        </item>
+    </channel>
+</rss>

@@ -1,0 +1,67 @@
+// Translates "jump to the originating tmux pane" into a tmux
+// switch-client invocation, then brings the host terminal app to the
+// foreground so the user can immediately start typing without an
+// app-switch chord.
+import AppKit
+import Foundation
+import BlipCore
+
+@MainActor
+final class JumpCoordinator {
+    private let model: AppModel
+
+    /// Bundle IDs of terminals likely to host a tmux session, in
+    /// preferred-order. The first one that's currently running gets
+    /// activated after the tmux switch.
+    private static let terminalBundleIds = [
+        "com.mitchellh.ghostty",     // Ghostty
+        "com.googlecode.iterm2",     // iTerm2
+        "io.alacritty",              // Alacritty
+        "net.kovidgoyal.kitty",      // kitty
+        "com.apple.Terminal",        // Apple Terminal
+        "dev.warp.Warp-Stable",      // Warp
+    ]
+
+    init(model: AppModel) { self.model = model }
+
+    /// Switches the tmux client to the originating pane AND brings the
+    /// host terminal app to the foreground.
+    func jumpToOriginating() {
+        let cwd = (model.state == .stack ? model.focusedStackCwd : nil) ?? model.lastCwd
+        guard let cwd else {
+            FileHandle.standardError.write(Data("[blip] jump: no cwd recorded yet\n".utf8))
+            return
+        }
+        do {
+            let jumped = try TmuxTargeter.jump(cwd: cwd)
+            if jumped {
+                activateTerminal()
+                model.dismiss()
+            } else {
+                FileHandle.standardError.write(
+                    Data("[blip] jump: no tmux pane matches cwd=\(cwd)\n".utf8)
+                )
+            }
+        } catch {
+            FileHandle.standardError.write(
+                Data("[blip] jump: tmux failed — \(error)\n".utf8)
+            )
+        }
+    }
+
+    /// Brings the most-recently-used running terminal app forward.
+    /// `tmux switch-client` only changes which session/window/pane the
+    /// tmux client points at — it doesn't change OS-level focus.
+    private func activateTerminal() {
+        let running = NSWorkspace.shared.runningApplications
+        for bundleId in Self.terminalBundleIds {
+            if let app = running.first(where: { $0.bundleIdentifier == bundleId }) {
+                app.activate(options: [.activateAllWindows])
+                return
+            }
+        }
+        FileHandle.standardError.write(
+            Data("[blip] jump: no known terminal running — focus stays put\n".utf8)
+        )
+    }
+}
