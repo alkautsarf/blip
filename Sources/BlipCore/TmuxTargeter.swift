@@ -94,9 +94,12 @@ public enum TmuxShell {
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
-        process.waitUntilExit()
-
+        // Drain stdout before waitUntilExit to avoid the pipe-buffer
+        // deadlock: `tmux list-panes -a` on a heavily-populated server
+        // can exceed the 64KB pipe buffer, at which point tmux blocks
+        // on write and waitUntilExit never returns.
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             let errData = stderr.fileHandleForReading.readDataToEndOfFile()
             let errMsg = String(data: errData, encoding: .utf8) ?? "(no stderr)"

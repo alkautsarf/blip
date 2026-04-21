@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-04-21
+
+### Fixed
+
+- Sessions overview silently lost every non-hook-sourced session when `ps -eo pid,tty,command` output grew past macOS's ~64KB pipe buffer. Both `ClaudePaneScan.runCommand` and `TmuxShell.run` called `Process.waitUntilExit()` **before** draining the child's stdout, so a full buffer meant the subprocess blocked on write and the parent hung on the wait — the scan task never returned and the registry stayed empty of tmux-seeded entries. On a busy system (multiple Claude sessions × bun plugin workers) this triggered at ~83KB. Fixed by draining stdout via `readDataToEndOfFile` first (which returns when the child closes stdout on exit) and calling `waitUntilExit` after. Latent since the scanner was introduced; newly surfaced as plugin footprints grew
+
 ## [0.4.0] - 2026-04-21
 
 ### Changed
@@ -149,6 +155,7 @@ After upgrading to 0.4.0: `blip install` once, grant Accessibility to **Blip.app
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.4.1]: https://github.com/alkautsarf/blip/releases/tag/v0.4.1
 [0.4.0]: https://github.com/alkautsarf/blip/releases/tag/v0.4.0
 [0.3.4]: https://github.com/alkautsarf/blip/releases/tag/v0.3.4
 [0.3.3]: https://github.com/alkautsarf/blip/releases/tag/v0.3.3

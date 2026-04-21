@@ -97,12 +97,18 @@ enum ClaudePaneScan {
         proc.standardError = Pipe()
         do {
             try proc.run()
-            proc.waitUntilExit()
         } catch {
             return nil
         }
-        guard proc.terminationStatus == 0 else { return nil }
+        // Drain stdout BEFORE waitUntilExit. macOS pipe buffer is ~64KB;
+        // `ps -eo pid,tty,command` on a busy system easily exceeds that
+        // (~83KB here with many bun plugin workers), and ps blocks on
+        // write when the buffer fills, deadlocking waitUntilExit.
+        // readDataToEndOfFile returns when ps closes stdout on exit,
+        // draining the pipe as it goes.
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else { return nil }
         return String(data: data, encoding: .utf8)
     }
 }
