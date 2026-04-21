@@ -84,6 +84,19 @@ enum Help {
 
 enum Lifecycle {
     static func start() {
+        // Preferred path: LaunchAgent owns the process. If it's installed,
+        // kickstart via launchd so the bundle identity is preserved and
+        // crash-respawn stays wired.
+        if LaunchAgent.isLoaded() {
+            do {
+                try LaunchAgent.kickstart()
+                Swift.print("✓ blip started via launchd (\(LaunchAgent.label))")
+                return
+            } catch {
+                fputs("warning: launchctl kickstart failed — falling back to direct spawn: \(error.localizedDescription)\n", stderr)
+            }
+        }
+
         if let runningPid = currentPid(), processAlive(pid: runningPid) {
             Swift.print("blip is already running (pid \(runningPid))")
             return
@@ -135,6 +148,20 @@ enum Lifecycle {
     }
 
     static func stop() {
+        // LaunchAgent-managed: SIGTERM via launchctl. With KeepAlive
+        // `SuccessfulExit=false`, clean exit means no respawn — perfect
+        // for an explicit `blip stop`.
+        if LaunchAgent.isLoaded() {
+            do {
+                try LaunchAgent.signal("SIGTERM")
+                Swift.print("✓ blip stopped (launchd, will stay down until `blip start`)")
+                try? FileManager.default.removeItem(at: LifecyclePaths.pidFile)
+                return
+            } catch {
+                fputs("warning: launchctl kill failed — falling back to PID kill: \(error.localizedDescription)\n", stderr)
+            }
+        }
+
         guard let pid = currentPid(), processAlive(pid: pid) else {
             Swift.print("blip is not running")
             try? FileManager.default.removeItem(at: LifecyclePaths.pidFile)
@@ -212,11 +239,28 @@ enum Lifecycle {
 enum Install {
     static func install() {
         do {
-            let binary = try resolveSibling("BlipHooks")
-            let manifest = try Installer.install(hookBinaryPath: binary.path)
-            Swift.print("✓ blip installed")
-            Swift.print("  hook binary: \(manifest.hookBinaryPath)")
-            Swift.print("  manifest:    \(InstallPaths.defaultPaths().manifest.path)")
+            // 1. Assemble / refresh the .app bundle. Stable path +
+            //    identifier is what makes the TCC grant persist across
+            //    future brew upgrades.
+            let sourceBinary = try resolveSibling("BlipApp")
+            let bundlePaths = try AppBundle.refresh(from: sourceBinary)
+            Swift.print("✓ bundle: \(bundlePaths.app.path)")
+
+            // 2. Wire Claude Code hooks (existing behavior).
+            let hookBinary = try resolveSibling("BlipHooks")
+            let manifest = try Installer.install(hookBinaryPath: hookBinary.path)
+            Swift.print("✓ hooks:  \(manifest.hookBinaryPath)")
+
+            // 3. Install + bootstrap the LaunchAgent so blip auto-starts
+            //    on login and respawns on crash. Points at the bundle
+            //    binary so launchd preserves bundle identity.
+            try LaunchAgent.install(bundleBinary: bundlePaths.binary)
+            Swift.print("✓ launchd: \(LaunchAgent.label) loaded")
+
+            Swift.print("")
+            Swift.print("blip is running. First launch triggers a one-time Accessibility")
+            Swift.print("prompt — grant it once and the permission persists across every")
+            Swift.print("future `brew upgrade` thanks to the stable bundle identifier.")
             Swift.print("")
             Swift.print("Restart any running `claude` sessions for the hook to pick up.")
         } catch {
@@ -225,11 +269,32 @@ enum Install {
     }
 
     static func uninstall() {
+        // Best-effort teardown — keep going through each step even if an
+        // earlier one fails so we don't strand partially-cleaned state.
+        var failed: [String] = []
+        do {
+            try LaunchAgent.uninstall()
+            Swift.print("✓ launchd: unloaded")
+        } catch {
+            failed.append("launchd: \(error.localizedDescription)")
+        }
         do {
             try Installer.uninstall()
-            Swift.print("✓ blip uninstalled — settings.json restored")
+            Swift.print("✓ hooks:   settings.json restored")
         } catch {
-            fputs("error: \(error.localizedDescription)\n", stderr); exit(1)
+            failed.append("hooks: \(error.localizedDescription)")
+        }
+        do {
+            try AppBundle.remove()
+            Swift.print("✓ bundle:  ~/Applications/Blip.app removed")
+        } catch {
+            failed.append("bundle: \(error.localizedDescription)")
+        }
+
+        if !failed.isEmpty {
+            fputs("warning: partial uninstall:\n", stderr)
+            for msg in failed { fputs("  - \(msg)\n", stderr) }
+            exit(1)
         }
     }
 }

@@ -7,7 +7,7 @@ import BlipCore
 let arguments = CommandLine.arguments
 
 guard arguments.count >= 2 else {
-    print("usage: BlipSetup <install|uninstall|status>")
+    print("usage: BlipSetup <install|uninstall|status|bundle-refresh>")
     exit(64)
 }
 
@@ -35,6 +35,20 @@ do {
             print("  hook entries:  \(manifest.addedHooks.count)")
         } else {
             print("blip is NOT installed (no manifest at \(paths.manifest.path))")
+        }
+
+    case "bundle-refresh":
+        // Called by the brew formula's post_install hook. Rebuilds the
+        // `.app` bundle from the freshly-installed cellar binary and
+        // re-signs with the stable designated requirement so the TCC
+        // grant survives the upgrade. If the LaunchAgent is loaded we
+        // also kickstart so the running process picks up the new binary.
+        let source = try ExecutableLookup.sibling(named: "BlipApp")
+        let bundlePaths = try AppBundle.refresh(from: source)
+        print("✓ refreshed bundle at \(bundlePaths.app.path)")
+        if LaunchAgent.isLoaded() {
+            try LaunchAgent.kickstart()
+            print("✓ launchd kickstarted — running process now on the new binary")
         }
 
     default:

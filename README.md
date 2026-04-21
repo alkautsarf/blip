@@ -54,14 +54,17 @@ ln -sf "$PWD/.build/release/Blip" ~/.local/bin/blip
 ### First-run setup
 
 ```bash
-blip start     # launch the notch app in the background
-blip install   # add hooks to ~/.claude/settings.json
+blip install   # assembles Blip.app, wires hooks, loads LaunchAgent, starts
 blip doctor    # verify everything's connected
 ```
 
+`blip install` is the single command that does everything — it builds the `.app` bundle at `~/Applications/Blip.app`, wires Claude Code hooks, installs the LaunchAgent so blip auto-starts at login, and kicks the service off.
+
 Grant Accessibility permission on first launch so global hotkeys fire from inside tmux:
 
-> System Settings → Privacy & Security → Accessibility → BlipApp
+> System Settings → Privacy & Security → Accessibility → **Blip.app**
+
+Because the bundle lives at a stable path with a stable identifier, the grant persists across every future `brew upgrade` — no need to re-toggle.
 
 ---
 

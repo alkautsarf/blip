@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-21
+
+### Changed
+
+- **Distribution**: blip now ships as a proper `.app` bundle at `~/Applications/Blip.app` instead of a raw Mach-O in `/opt/homebrew/bin/`. The bundle has a stable `CFBundleIdentifier=com.elpabl0.blip` and is ad-hoc signed with an explicit designated requirement `identifier "com.elpabl0.blip"`. macOS TCC keys grants by the DR, so the Accessibility permission now persists forever across `brew upgrade` — grant once on first install, never again. Previously every brew upgrade moved the binary to a new cellar path (`HEAD-<sha>/bin/BlipApp`) and changed its cdhash, which TCC treated as a completely new app.
+- **`blip install`** now does full setup: assembles/refreshes the bundle, wires Claude Code hooks (existing), writes `~/Library/LaunchAgents/com.elpabl0.blip.plist` pointing inside the bundle, and `launchctl bootstrap`s the service so blip auto-starts on login and respawns on crash. Single command replaces the previous `blip install` + manual `launchctl load`.
+- **`blip uninstall`** now tears down the bundle + LaunchAgent in addition to the hooks (best-effort, continues through each step even on partial failure).
+- **`blip start` / `stop` / `restart`** prefer launchctl when the LaunchAgent is loaded, falling back to direct spawn/PID-kill only for dev workflows without the agent.
+- New `BlipSetup bundle-refresh` subcommand — called from the brew formula's `post_install` hook to rebuild the bundle from the freshly-compiled binary and re-sign with the stable DR. If the LaunchAgent is loaded, also kickstarts the service so the running process picks up the new binary automatically.
+
+### Migration
+
+After upgrading to 0.4.0: `blip install` once, grant Accessibility to **Blip.app** when macOS prompts, then remove the stale "BlipApp" rows from System Settings → Privacy & Security → Accessibility. Future upgrades are zero-touch for permissions.
+
 ## [0.3.4] - 2026-04-21
 
 ### Fixed
@@ -135,6 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.4.0]: https://github.com/alkautsarf/blip/releases/tag/v0.4.0
 [0.3.4]: https://github.com/alkautsarf/blip/releases/tag/v0.3.4
 [0.3.3]: https://github.com/alkautsarf/blip/releases/tag/v0.3.3
 [0.3.2]: https://github.com/alkautsarf/blip/releases/tag/v0.3.2
