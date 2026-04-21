@@ -247,16 +247,23 @@ enum Install {
             let bundlePaths = try AppBundle.refresh(from: sourceBinary)
             Swift.print("✓ bundle: \(bundlePaths.app.path)")
 
-            // 2. Wire Claude Code hooks. Idempotent: if the manifest
-            //    already exists we leave the hooks alone — re-running
-            //    `blip install` after a brew upgrade shouldn't churn
-            //    settings.json.
-            let hookBinary = try resolveSibling("BlipHooks")
+            // 2. Wire Claude Code hooks. Prefer the brew-stable symlink
+            //    path (`/opt/homebrew/bin/BlipHooks`) over the cellar
+            //    path so future `brew upgrade`s don't orphan the hook
+            //    entry. Idempotent, but re-registers when the recorded
+            //    path either vanished (stale cellar after brew cleanup)
+            //    or no longer matches what we'd freshly resolve.
+            let hookBinary = try ExecutableLookup.stableSibling(named: "BlipHooks")
             let manifestPath = InstallPaths.defaultPaths().manifest
-            if let existing = Installer.readManifest(at: manifestPath),
-               !existing.addedHooks.isEmpty {
+            let existing = Installer.readManifest(at: manifestPath)
+            let stale = existing.map { m in
+                m.hookBinaryPath != hookBinary.path
+                    || !FileManager.default.isExecutableFile(atPath: m.hookBinaryPath)
+            } ?? false
+            if let existing, !existing.addedHooks.isEmpty, !stale {
                 Swift.print("✓ hooks:  already wired (\(existing.hookBinaryPath))")
             } else {
+                if existing != nil { try? Installer.uninstall() }
                 let manifest = try Installer.install(hookBinaryPath: hookBinary.path)
                 Swift.print("✓ hooks:  \(manifest.hookBinaryPath)")
             }

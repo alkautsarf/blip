@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-04-21
+
+### Fixed
+
+- `blip install` recorded the hook binary at its versioned brew cellar path (`/opt/homebrew/Cellar/blip/HEAD-<sha>/bin/BlipHooks`), so the next `brew upgrade` left Claude Code trying to exec a deleted file — every hook event failed with "No such file or directory" and nothing (notch, sounds, overview) worked until `blip uninstall && blip install` was run manually. Two fixes in one: (1) added `ExecutableLookup.stableSibling(_:)` that prefers the brew-stable `/opt/homebrew/bin/<name>` symlink over the cellar path when the resolved binary lives under a Cellar/, so freshly-registered hooks now use a path that survives cellar rotations; (2) `blip install` is no longer blindly idempotent — if the manifest's recorded hook path no longer exists or differs from what we'd freshly resolve, it auto-reinstalls. Covers both existing-stale-state and future-upgrade scenarios.
+
 ## [0.4.1] - 2026-04-21
 
 ### Fixed
@@ -155,6 +161,7 @@ After upgrading to 0.4.0: `blip install` once, grant Accessibility to **Blip.app
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.4.2]: https://github.com/alkautsarf/blip/releases/tag/v0.4.2
 [0.4.1]: https://github.com/alkautsarf/blip/releases/tag/v0.4.1
 [0.4.0]: https://github.com/alkautsarf/blip/releases/tag/v0.4.0
 [0.3.4]: https://github.com/alkautsarf/blip/releases/tag/v0.3.4

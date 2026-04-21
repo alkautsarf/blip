@@ -30,4 +30,26 @@ public enum ExecutableLookup {
         }
         return sibling
     }
+
+    /// Like `sibling(named:)` but prefers a brew-stable symlink path
+    /// (e.g. `/opt/homebrew/bin/BlipHooks`) when the resolved binary
+    /// lives under a versioned cellar. Settings files (hook registration,
+    /// LaunchAgent plist) should use this so paths stay valid across
+    /// `brew upgrade` cellar rotations.
+    public static func stableSibling(named name: String) throws -> URL {
+        let resolved = try sibling(named: name)
+        let path = resolved.path
+        // Detect brew cellar installs (both /opt/homebrew and /usr/local
+        // Intel prefixes). Rewrite to the prefix/bin symlink if it
+        // points back at the same file.
+        for prefix in ["/opt/homebrew", "/usr/local"] {
+            let cellarPrefix = "\(prefix)/Cellar/"
+            guard path.hasPrefix(cellarPrefix) else { continue }
+            let stable = URL(fileURLWithPath: "\(prefix)/bin/\(name)")
+            if FileManager.default.isExecutableFile(atPath: stable.path) {
+                return stable
+            }
+        }
+        return resolved
+    }
 }
