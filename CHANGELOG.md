@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-04-21
+
+### Fixed
+
+- Focus-aware suppression silently failed when BlipApp was auto-started via LaunchAgent — launchd spawns processes with a bare `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, so `env tmux …` couldn't find tmux at `/opt/homebrew/bin/tmux`, `TmuxShell.run` threw, and `isPaneFocused` returned false for every query. `TmuxShell.run` now prepends `/opt/homebrew/bin:/usr/local/bin` to the subprocess PATH so tmux resolves regardless of whether blip was started by launchctl or a shell
+
 ## [0.3.2] - 2026-04-21
 
 ### Fixed
@@ -123,6 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.3.3]: https://github.com/alkautsarf/blip/releases/tag/v0.3.3
 [0.3.2]: https://github.com/alkautsarf/blip/releases/tag/v0.3.2
 [0.3.1]: https://github.com/alkautsarf/blip/releases/tag/v0.3.1
 [0.3.0]: https://github.com/alkautsarf/blip/releases/tag/v0.3.0

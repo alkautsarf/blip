@@ -80,6 +80,15 @@ public enum TmuxShell {
         process.launchPath = "/usr/bin/env"
         process.arguments = ["tmux"] + args
 
+        // launchd spawns us with a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin)
+        // and tmux lives under /opt/homebrew/bin (Apple Silicon) or
+        // /usr/local/bin (Intel). Prepend both so `env tmux` resolves
+        // regardless of whether we were started by launchctl or a shell.
+        var env = ProcessInfo.processInfo.environment
+        let existing = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + existing
+        process.environment = env
+
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout
