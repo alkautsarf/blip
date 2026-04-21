@@ -1,6 +1,6 @@
 # blip.vim
 
-A macOS notch app for terminal-native [Claude Code](https://www.anthropic.com/claude-code) users. Surfaces Claude's last assistant reply, an animated walking pet, and interactive `AskUserQuestion` / plan-mode pickers — all without leaving tmux.
+A macOS notch app for terminal-native [Claude Code](https://www.anthropic.com/claude-code) users. Surfaces Claude's last assistant reply, an animated walking pet, and interactive `AskUserQuestion` / plan-mode pickers in the notch. Peripheral awareness of your sessions while you're working in any other app.
 
 ```
 ┌────────── elpabl0 · pick ───────────┐
