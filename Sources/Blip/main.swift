@@ -241,19 +241,29 @@ enum Install {
         do {
             // 1. Assemble / refresh the .app bundle. Stable path +
             //    identifier is what makes the TCC grant persist across
-            //    future brew upgrades.
+            //    future brew upgrades. This is the step that needs to
+            //    re-run on every `brew upgrade`.
             let sourceBinary = try resolveSibling("BlipApp")
             let bundlePaths = try AppBundle.refresh(from: sourceBinary)
             Swift.print("✓ bundle: \(bundlePaths.app.path)")
 
-            // 2. Wire Claude Code hooks (existing behavior).
+            // 2. Wire Claude Code hooks. Idempotent: if the manifest
+            //    already exists we leave the hooks alone — re-running
+            //    `blip install` after a brew upgrade shouldn't churn
+            //    settings.json.
             let hookBinary = try resolveSibling("BlipHooks")
-            let manifest = try Installer.install(hookBinaryPath: hookBinary.path)
-            Swift.print("✓ hooks:  \(manifest.hookBinaryPath)")
+            let manifestPath = InstallPaths.defaultPaths().manifest
+            if let existing = Installer.readManifest(at: manifestPath),
+               !existing.addedHooks.isEmpty {
+                Swift.print("✓ hooks:  already wired (\(existing.hookBinaryPath))")
+            } else {
+                let manifest = try Installer.install(hookBinaryPath: hookBinary.path)
+                Swift.print("✓ hooks:  \(manifest.hookBinaryPath)")
+            }
 
-            // 3. Install + bootstrap the LaunchAgent so blip auto-starts
-            //    on login and respawns on crash. Points at the bundle
-            //    binary so launchd preserves bundle identity.
+            // 3. Install + bootstrap the LaunchAgent. LaunchAgent.install
+            //    handles the "already loaded" case by bootout + reload, so
+            //    re-runs always land on the current plist contents.
             try LaunchAgent.install(bundleBinary: bundlePaths.binary)
             Swift.print("✓ launchd: \(LaunchAgent.label) loaded")
 
