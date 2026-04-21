@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-04-21
+
+### Fixed
+
+- Notch overlay was eating mouse clicks across a 900×300pt strip at the top of the display — the panel is sized oversized to let SwiftUI morph between states without resizing, but `ignoresMouseEvents = false` meant the transparent padding intercepted menu-bar icon clicks and window close buttons that fell within its bounds. Flipped to `ignoresMouseEvents = true`; blip is entirely hotkey-driven so no interactive surface is lost
+
 ## [0.3.3] - 2026-04-21
 
 ### Fixed
@@ -129,6 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.3.4]: https://github.com/alkautsarf/blip/releases/tag/v0.3.4
 [0.3.3]: https://github.com/alkautsarf/blip/releases/tag/v0.3.3
 [0.3.2]: https://github.com/alkautsarf/blip/releases/tag/v0.3.2
 [0.3.1]: https://github.com/alkautsarf/blip/releases/tag/v0.3.1

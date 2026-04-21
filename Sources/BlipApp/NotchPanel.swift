@@ -21,7 +21,13 @@ final class NotchPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        ignoresMouseEvents = false
+        // The panel is oversized (900×300) to give SwiftUI room to morph
+        // between states without resizing the window. Most of that area is
+        // transparent padding. blip has zero click-driven UI — every
+        // interaction is a global hotkey — so we pass mouse events through
+        // to whatever's underneath. Prevents us from eating menu-bar icon
+        // clicks and window close buttons that overlap our bounds.
+        ignoresMouseEvents = true
         contentView = hosting
         isReleasedWhenClosed = false
     }

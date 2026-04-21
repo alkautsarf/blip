@@ -3,5 +3,5 @@
 import Foundation
 
 public enum BlipCore {
-    public static let version = "0.3.3"
+    public static let version = "0.3.4"
 }
