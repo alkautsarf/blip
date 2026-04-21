@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-04-21
+
+### Fixed
+
+- Focus-aware suppression silently broke whenever a second terminal tab attached to the same tmux session — `TerminalFocusDetector.isPaneFocused` treated `session_attached` as a boolean but tmux emits it as a client count, so every row reported `2` and the filter rejected the match. Relaxed the check to `!= "0"` (any attached client) so the detector correctly suppresses Stop events for the pane you're actually looking at, regardless of how many clients are parked on the session
+
 ## [0.3.1] - 2026-04-20
 
 ### Changed
@@ -117,6 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.3.2]: https://github.com/alkautsarf/blip/releases/tag/v0.3.2
 [0.3.1]: https://github.com/alkautsarf/blip/releases/tag/v0.3.1
 [0.3.0]: https://github.com/alkautsarf/blip/releases/tag/v0.3.0
 [0.2.0]: https://github.com/alkautsarf/blip/releases/tag/v0.2.0

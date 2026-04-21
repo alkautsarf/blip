@@ -49,11 +49,15 @@ enum TerminalFocusDetector {
         ])) ?? ""
         for line in text.split(separator: "\n") {
             let fields = line.split(separator: " ")
+            // session_attached is a count (0, 1, 2, …). Any positive
+            // value means at least one client is attached — don't require
+            // exactly 1, that regresses the moment the user opens a
+            // second terminal tab attached to the same session.
             if fields.count >= 4,
                fields[0] == Substring(paneId),
                fields[1] == "1",
                fields[2] == "1",
-               fields[3] == "1" {
+               fields[3] != "0" {
                 return true
             }
         }
