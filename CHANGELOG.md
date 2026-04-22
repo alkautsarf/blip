@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-04-22
+
+### Fixed
+
+- Pet sprite rendered with a visible lego-grid of seams between every cell on the body. `PetFrameView`'s Canvas drew each cell as its own `context.fill(Path(cellRect), …)` call; with cell size at `28 / 12 ≈ 2.33pt` the edges never landed on physical pixel boundaries, so Core Graphics anti-aliased every adjacent cell boundary against the transparent background, leaving a faint darker seam around each cell. Fix: batch all same-color cells into one compound `Path` per color (keyed by character via the existing `fill(for:)` palette helper) and do a single fill per color. Interior cell-to-cell boundaries now live inside a single connected region and stop showing as seams. Glyph overlays (closed-eye dash, thought-bubble dot, `?` accent, keyboard key highlight, skate wheel) still draw in a second pass so they composite on top of their filled backgrounds.
+
+### Changed
+
+- Typing poses (`typingA`, `typingB`, `typingSip`, `typingThink`) redrawn so both hands are 2-cell blocks with clear vertical alternation. Previously one hand was a full body-extension and the other a single 1-cell tip — the tip read as a disconnected pixel, not a hand. Now each frame shows one hand extended onto the keyboard (striking) and the other floating as a 2-cell hand above (raised), with the hands trading rows between A and B (upper hand row 3 ↔ row 4, lower hand row 6 ↔ row 5) so the tap rhythm reads as true two-finger typing. Sip and think frames follow the same convention — no more floating 1-cell mugs or mid-air arm tips.
+
 ## [0.4.3] - 2026-04-22
 
 ### Fixed
@@ -167,6 +177,7 @@ After upgrading to 0.4.0: `blip install` once, grant Accessibility to **Blip.app
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.4.4]: https://github.com/alkautsarf/blip/releases/tag/v0.4.4
 [0.4.3]: https://github.com/alkautsarf/blip/releases/tag/v0.4.3
 [0.4.2]: https://github.com/alkautsarf/blip/releases/tag/v0.4.2
 [0.4.1]: https://github.com/alkautsarf/blip/releases/tag/v0.4.1

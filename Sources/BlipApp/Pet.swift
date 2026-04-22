@@ -328,60 +328,61 @@ enum PetFrames {
         "..BB....BS..",
     ])
 
-    // Typing frame A — UPPER arm strikes (row 4 extended onto the keys),
-    // LOWER arm is lifted mid-tap (tip retracted to col 10 row 5, just
-    // off the keyboard). Alternates with B below so one hand is always
-    // down while the other is up — the rhythm the user associates with
-    // real two-finger typing.
+    // Typing frame A — UPPER arm RAISED high (row 3: 2-cell hand hovering
+    // at cols 10–11, well above keyboard), LOWER arm STRIKING low (row 6:
+    // body-extended onto keys). Wide vertical separation between hands —
+    // clearly reads as "one up, one down."
     static let typingA = PetFrame(rows: [
+        "............",
+        "..BBBBBBBS..",
+        "..BBBBEBES..",
+        "..BBBBBBBSBB",
+        "..BBBBBBBS..",
+        "..BBBBBBBS..",
+        "..BBBBBBBBBS",
+        "...BB..BB...",
+    ])
+
+    // Typing frame B — inverse of A. UPPER arm STRIKES (row 4 body-extended
+    // onto keys), LOWER arm RAISED (row 5: 2-cell hand hovering at cols
+    // 10–11). Between frames: upper hand goes DOWN (row 3 → 4), lower hand
+    // comes UP (row 6 → 5). Clear "vice-versa" motion every beat.
+    static let typingB = PetFrame(rows: [
         "............",
         "..BBBBBBBS..",
         "..BBBBEBES..",
         "..BBBBBBBS..",
         "..BBBBBBBBBS",
-        "..BBBBBBBSB.",
+        "..BBBBBBBSBB",
         "..BBBBBBBS..",
         "...BB..BB...",
     ])
 
-    // Typing frame B — UPPER arm is now LIFTED (tip up at col 10 row 2,
-    // above the shoulder), LOWER arm strikes (row 6 extended onto the
-    // keys). Inverse of A — hands swap every beat.
-    static let typingB = PetFrame(rows: [
-        "............",
-        "..BBBBBBBS..",
-        "..BBBBEBESB.",
-        "..BBBBBBBS..",
-        "..BBBBBBBS..",
-        "..BBBBBBBS..",
-        "..BBBBBBBBBS",
-        "...BB..BB...",
-    ])
-
-    // Typing → sip break. Upper arm curls up to face level holding a
-    // cup (col 11 row 2); lower arm stays resting on the keyboard so
-    // the pet reads as "paused mid-type to drink", not "walked away".
+    // Typing → sip break. Upper arm curls up with a 2-cell mug held at face
+    // level (cols 10–11 row 2). Arm connects through a 2-cell bridge at row
+    // 3, so the mug reads as being held — not floating. Lower arm stays on
+    // the keyboard so the pet still reads as "mid-type, paused for sip."
     static let typingSip = PetFrame(rows: [
         "............",
         "..BBBBBBBS..",
-        "..BBBBEBES.B",
-        "..BBBBBBBSB.",
+        "..BBBBEBESBB",
+        "..BBBBBBBSBB",
         "..BBBBBBBS..",
         "..BBBBBBBS..",
         "..BBBBBBBBBS",
         "...BB..BB...",
     ])
 
-    // Typing + thought bubble. Same alternating pose as A (upper down,
-    // lower up) with a drifting "o" bubble above the head to signal
-    // active reasoning while typing.
+    // Typing + thought bubble. Same two-hand alternation as A (upper down,
+    // lower up) with a drifting "o" bubble above the head — active reasoning
+    // while typing.
     static let typingThink = PetFrame(rows: [
         "..........o.",
         "..BBBBBBBS..",
         "..BBBBEBES..",
         "..BBBBBBBS..",
         "..BBBBBBBBBS",
-        "..BBBBBBBSB.",
+        "..BBBBBBBSBB",
         "..BBBBBBBS..",
         "...BB..BB...",
     ])
@@ -1075,22 +1076,46 @@ private struct PetFrameView: View {
 
     var body: some View {
         Canvas { context, _ in
-            let orange = Color(red: 0.94, green: 0.47, blue: 0.35)
+            // Cell size is fractional (e.g. 28/12 ≈ 2.33pt) so cell edges don't
+            // land on physical pixel boundaries. Filling each cell as its own
+            // Path leaves an anti-aliased seam between every pair — reads as a
+            // lego-grid on the body. Fix: batch same-color cells into one Path
+            // so Core Graphics draws them as a single connected shape with no
+            // internal seams. Only inter-color boundaries still antialias, and
+            // those are far less frequent than cell-to-cell.
+            var pathsByChar: [Character: Path] = [:]
+            for (r, row) in frame.rows.enumerated() {
+                for (c, ch) in row.enumerated() {
+                    let baseCh = baseChar(for: ch)
+                    guard fill(for: baseCh) != nil else { continue }
+                    let rect = CGRect(
+                        x: CGFloat(c) * cell, y: CGFloat(r) * cell,
+                        width: cell, height: cell
+                    )
+                    pathsByChar[baseCh, default: Path()].addRect(rect)
+                }
+            }
+            for (ch, path) in pathsByChar {
+                if let color = fill(for: ch) {
+                    context.fill(path, with: .color(color))
+                }
+            }
+
+            // Second pass: glyphs (dashes, dots, rounded squares, inset
+            // highlights, wheels) must draw AFTER the color fills so they
+            // composite on top of their cell backgrounds.
+            let orange = fill(for: "B") ?? Color.orange
             for (r, row) in frame.rows.enumerated() {
                 for (c, ch) in row.enumerated() {
                     let x = CGFloat(c) * cell
                     let y = CGFloat(r) * cell
                     switch ch {
                     case "c":
-                        // Closed eye — body-colored cell with a black dash centered.
-                        let cellRect = CGRect(x: x, y: y, width: cell, height: cell)
-                        context.fill(Path(cellRect), with: .color(orange))
                         let lineH = max(1, cell * 0.35)
                         let dashY = y + (cell - lineH) / 2
                         let dashRect = CGRect(x: x, y: dashY, width: cell, height: lineH)
                         context.fill(Path(dashRect), with: .color(.black))
                     case "o":
-                        // Thought-bubble dot — small centered orange circle.
                         let pad = cell * 0.22
                         let dotRect = CGRect(
                             x: x + pad, y: y + pad,
@@ -1101,25 +1126,16 @@ private struct PetFrameView: View {
                             with: .color(orange.opacity(0.75))
                         )
                     case "?":
-                        // Question-mark accent — full-cell rounded orange square
-                        // (reads as a small prominent bubble next to the head).
                         let pad = cell * 0.08
                         let rect = CGRect(
                             x: x + pad, y: y + pad,
                             width: cell - 2 * pad, height: cell - 2 * pad
                         )
-                        let path = Path(
-                            roundedRect: rect,
-                            cornerRadius: cell * 0.22
+                        context.fill(
+                            Path(roundedRect: rect, cornerRadius: cell * 0.22),
+                            with: .color(orange)
                         )
-                        context.fill(path, with: .color(orange))
                     case "k":
-                        // Keyboard key-dot highlight — gray cell base with a
-                        // brighter key-cap square inset. Signals "these are
-                        // keys" at the small notch render size.
-                        let keyboard = Color(white: 0.32)
-                        let cellRect = CGRect(x: x, y: y, width: cell, height: cell)
-                        context.fill(Path(cellRect), with: .color(keyboard))
                         let pad = cell * 0.18
                         let keyRect = CGRect(
                             x: x + pad, y: y + pad,
@@ -1127,7 +1143,6 @@ private struct PetFrameView: View {
                         )
                         context.fill(Path(keyRect), with: .color(Color(white: 0.6)))
                     case "w":
-                        // Skate wheel — small dark circle centered in the cell.
                         let pad = cell * 0.08
                         let wheelRect = CGRect(
                             x: x + pad, y: y + pad,
@@ -1137,14 +1152,22 @@ private struct PetFrameView: View {
                             Path(ellipseIn: wheelRect),
                             with: .color(Color(white: 0.08))
                         )
-                    default:
-                        if let color = fill(for: ch) {
-                            let rect = CGRect(x: x, y: y, width: cell, height: cell)
-                            context.fill(Path(rect), with: .color(color))
-                        }
+                    default: break
                     }
                 }
             }
+        }
+    }
+
+    /// Route compound chars (`c` closed-eye, `k` key-highlight) to the base
+    /// char whose `fill(for:)` color defines their cell background. Other
+    /// chars map to themselves — `fill(for:)` then decides whether to fill
+    /// them at all.
+    private func baseChar(for ch: Character) -> Character {
+        switch ch {
+        case "c": return "B"
+        case "k": return "K"
+        default:  return ch
         }
     }
 
