@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-04-22
+
+### Fixed
+
+- `blip doctor` and `blip status` reported "App is running: no" even when blip was alive — both commands only consulted `~/Library/Application Support/blip/blip.pid`, which is written by the direct-spawn code path but not by the LaunchAgent (the normal case since 0.4.0). Added `LaunchAgent.runningPid()` that parses `launchctl print gui/<uid>/com.elpabl0.blip` for the live pid, and made both commands prefer it before falling back to the pid file. Also swapped the dead `blipv.im/troubleshooting` URL printed at the end of `blip doctor` for the real `github.com/alkautsarf/blip#troubleshooting` anchor.
+
 ## [0.4.2] - 2026-04-21
 
 ### Fixed
@@ -161,6 +167,7 @@ After upgrading to 0.4.0: `blip install` once, grant Accessibility to **Blip.app
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.4.3]: https://github.com/alkautsarf/blip/releases/tag/v0.4.3
 [0.4.2]: https://github.com/alkautsarf/blip/releases/tag/v0.4.2
 [0.4.1]: https://github.com/alkautsarf/blip/releases/tag/v0.4.1
 [0.4.0]: https://github.com/alkautsarf/blip/releases/tag/v0.4.0

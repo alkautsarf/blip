@@ -20,7 +20,7 @@ enum Doctor {
         check("Flag files", checkFlagFiles)
         check("Config file", checkConfig)
 
-        print("\nIf any check failed, see https://blipv.im/troubleshooting")
+        print("\nIf any check failed, see https://github.com/alkautsarf/blip#troubleshooting")
     }
 
     // MARK: - Result printing
@@ -44,13 +44,17 @@ enum Doctor {
     // MARK: - Checks
 
     private static func checkAppRunning() -> Result {
-        guard let raw = try? String(contentsOf: LifecyclePaths.pidFile, encoding: .utf8),
-              let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
-              kill(pid, 0) == 0
-        else {
-            return Result(ok: false, detail: "no live BlipApp pid — run `blip start`")
+        // Prefer launchd's own view when the agent is loaded; fall back
+        // to the pid file for direct-spawn flows.
+        if let pid = LaunchAgent.runningPid(), kill(pid, 0) == 0 {
+            return Result(ok: true, detail: "pid \(pid) (launchd)")
         }
-        return Result(ok: true, detail: "pid \(pid)")
+        if let raw = try? String(contentsOf: LifecyclePaths.pidFile, encoding: .utf8),
+           let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           kill(pid, 0) == 0 {
+            return Result(ok: true, detail: "pid \(pid)")
+        }
+        return Result(ok: false, detail: "no live BlipApp pid — run `blip start`")
     }
 
     private static func checkSocket() -> Result {

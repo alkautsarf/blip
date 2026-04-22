@@ -92,6 +92,22 @@ public enum LaunchAgent {
         FileManager.default.fileExists(atPath: paths.plist.path)
     }
 
+    /// Parses `launchctl print <service>` for the `pid = N` line. Returns
+    /// nil if the service isn't loaded or hasn't spawned a process.
+    public static func runningPid() -> Int32? {
+        guard let (code, output) = try? captureLaunchctl(["print", serviceTarget()]),
+              code == 0
+        else { return nil }
+        for line in output.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("pid = ") else { continue }
+            let rest = trimmed.dropFirst("pid = ".count)
+                .trimmingCharacters(in: .whitespaces)
+            return Int32(rest)
+        }
+        return nil
+    }
+
     // MARK: - Plist content
 
     private static func plistXML(bundleBinary: URL) -> String {

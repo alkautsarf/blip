@@ -221,6 +221,9 @@ enum Lifecycle {
     // MARK: - PID + process helpers
 
     private static func currentPid() -> Int32? {
+        if let pid = LaunchAgent.runningPid() {
+            return pid
+        }
         guard let raw = try? String(contentsOf: LifecyclePaths.pidFile, encoding: .utf8) else {
             return nil
         }
