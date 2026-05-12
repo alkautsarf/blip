@@ -418,11 +418,12 @@ struct NotchView: View {
         if model.sessions.activeIds.contains(entry.id) {
             return SessionStatus(color: inputGreen, label: "working", pulsing: true)
         }
-        return SessionStatus(
-            color: softBlue.opacity(0.85),
-            label: entry.lastTurnText.isEmpty ? "idle" : "done",
-            pulsing: false
-        )
+        // Everything else in the registry is alive (reconcile evicts
+        // sessions whose pane/worker is gone). "done" used to render
+        // for any entry with a recorded Stop, but that confused users
+        // whose interactive sessions sit idle between prompts — the
+        // session is still up, ready for the next prompt, not "done".
+        return SessionStatus(color: softBlue.opacity(0.85), label: "idle", pulsing: false)
     }
 
     private var peekBody: some View {

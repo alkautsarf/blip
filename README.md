@@ -135,27 +135,27 @@ Lives at `~/.config/blip/config.json`. Missing file or missing keys fall back to
 
 ## Tmux integration
 
-blip's **jump-to-pane** feature uses tmux to switch you back to wherever Claude's reply came from. It looks up the originating pane in priority order:
+blip's **jump-to-pane** routes by what kind of session the focused row represents:
 
-1. **Pane option `@cwd`** on any pane matching the session's `cwd` (recommended — zero false positives)
-2. **Active pane's `pane_current_path`** matching the session's cwd
-3. **Window name `c:<basename>`** where `<basename>` is the cwd's last path component
+1. **Tmux-anchored rows** (interactive `claude` sessions blip picked up from a `tmux list-panes` scan): jump via the pane id directly. blip calls `tmux display-message -t %paneId -p '#{session_name}:#{window_index}.#{pane_index}'` to resolve the canonical target, then `tmux switch-client`. No tmux config required.
+2. **Background-agent rows** (sessions hosted by `claude agents`): blip opens a fresh tmux window running `claude attach <short-id>` and switches to it. The window self-destructs when you detach (`←` on an empty prompt), so attach views never accumulate.
+3. **CWD fallback** (legacy path, used only when neither route above applies): matches by tmux pane option `@cwd` on the originating cwd, or by window name `c:<basename>`.
 
-### Recommended tmux config
+The first two routes work out of the box. The `@cwd` fallback is optional — only relevant for unusual setups where blip can't otherwise resolve the pane.
 
-Add to `~/.tmux.conf` (or `~/.tmux.conf.local` if you use [oh-my-tmux](https://github.com/gpakosz/.tmux)):
+### Optional: legacy `@cwd` fallback
+
+If you want the cwd-based fallback to find your panes, add to `~/.tmux.conf` (or `~/.tmux.conf.local` if you use [oh-my-tmux](https://github.com/gpakosz/.tmux)):
 
 ```tmux
-# Auto-set @cwd on every new pane/window — gives blip a reliable
-# cwd-to-pane mapping regardless of your prompt or shell.
 set-hook -g after-new-window       'set-option -p @cwd "#{pane_current_path}"'
 set-hook -g after-split-window     'set-option -p @cwd "#{pane_current_path}"'
 set-hook -g after-send-keys        'set-option -p @cwd "#{pane_current_path}"'
 ```
 
-Reload with `tmux source-file ~/.tmux.conf` and the jump hotkey will resolve targets in milliseconds.
+Reload with `tmux source-file ~/.tmux.conf`.
 
-If you prefer the window-naming convention, rename your windows to `c:<basename>` — e.g. in `~/Documents/blip.vim`, run `tmux rename-window c:blip.vim`. Automate via the [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) or your own shell function if desired.
+Alternatively, rename project windows to `c:<basename>` (e.g. `tmux rename-window c:blip.vim` inside `~/Documents/blip.vim`) and the fallback will match on the window-name convention.
 
 ---
 

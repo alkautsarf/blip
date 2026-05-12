@@ -25,8 +25,39 @@ final class JumpCoordinator {
     init(model: AppModel) { self.model = model }
 
     /// Switches the tmux client to the originating pane AND brings the
-    /// host terminal app to the foreground.
+    /// host terminal app to the foreground. Routes by the focused
+    /// entry's shape, applied uniformly across `.sessions`,
+    /// `.preview`, `.stack`, and the other passive surfaces:
+    ///   - tmux-anchored entry (`tmuxPane` set): switch via pane id.
+    ///   - bg entry (no `tmuxPane`, id is a session UUID): open a
+    ///     fresh tmux window running `claude attach <short>` and
+    ///     switch to it. Otherwise the cwd fallback below would match
+    ///     an unrelated interactive pane that happens to share the
+    ///     bg session's cwd.
+    ///   - cwd fallback: last resort when no entry is resolved or the
+    ///     entry-based routes can't reach a usable target.
     func jumpToOriginating() {
+        if let entry = model.currentJumpEntry() {
+            if let paneId = entry.tmuxPane {
+                if (try? TmuxTargeter.jump(paneId: paneId)) == true {
+                    activateTerminal()
+                    model.dismiss()
+                    return
+                }
+            } else if !entry.id.hasPrefix("tmux:"), entry.id.contains("-") {
+                let short = String(entry.id.prefix(8))
+                do {
+                    _ = try TmuxTargeter.attachBackground(shortId: short)
+                    activateTerminal()
+                    model.dismiss()
+                    return
+                } catch {
+                    FileHandle.standardError.write(
+                        Data("[blip] jump: bg attach failed for \(short): \(error); falling back to cwd\n".utf8)
+                    )
+                }
+            }
+        }
         let cwd: String?
         switch model.state {
         case .stack:    cwd = model.focusedStackCwd ?? model.lastCwd

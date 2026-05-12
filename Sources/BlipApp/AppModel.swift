@@ -320,13 +320,40 @@ final class AppModel: ObservableObject {
         state = .sessions
     }
 
-    /// Cwd of the currently focused session in `.sessions` — used by
-    /// the jump hotkey so Enter jumps to that pane's terminal.
-    var focusedSessionCwd: String? {
+    /// The currently-focused entry in `.sessions` state, used by the
+    /// jump hotkey to decide which routing strategy applies (paneId for
+    /// tmux-anchored rows, `claude attach` for bg rows, cwd matching
+    /// as last-ditch fallback).
+    func focusedSessionEntry() -> SessionRegistry.Entry? {
         let list = sessionsOverview
         guard !list.isEmpty else { return nil }
-        return list[min(focusedSessionIndex, list.count - 1)].cwd
+        return list[min(focusedSessionIndex, list.count - 1)]
     }
+
+    /// The entry the jump hotkey should target given the current UI
+    /// surface. `.sessions` uses the focused overview row; `.stack`
+    /// uses the focused carousel card; passive surfaces
+    /// (`.preview`/`.expand`/`.peek`) resolve via `lastSessionId` so
+    /// auto-surfaced rows route the same way as overview picks.
+    func currentJumpEntry() -> SessionRegistry.Entry? {
+        switch state {
+        case .sessions:
+            return focusedSessionEntry()
+        case .stack:
+            let entries = stackEntries
+            guard !entries.isEmpty else { return nil }
+            return entries[min(focusedStackEntry, entries.count - 1)]
+        case .preview, .expand, .peek, .question:
+            guard let id = lastSessionId else { return nil }
+            return sessions.entry(forId: id)
+        default:
+            return nil
+        }
+    }
+
+    var focusedSessionCwd: String? { focusedSessionEntry()?.cwd }
+
+    var focusedSessionPaneId: String? { focusedSessionEntry()?.tmuxPane }
 
     /// Reset scroll anchor + measured height when a new preview lands.
     /// Without this we inherit the previous reply's scroll position

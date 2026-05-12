@@ -19,11 +19,24 @@ final class BlipAppDelegate: NSObject, NSApplicationDelegate {
     private func reconcileSessions() {
         let registry = model.sessions
         Task.detached(priority: .utility) {
-            let panes = ClaudePaneScan.claudePanes().map {
-                (paneId: $0.paneId, pid: $0.pid, cwd: $0.cwd)
+            let panes = ClaudePaneScan.claudePanes().map { p -> SessionRegistry.ScannedPane in
+                let displayTag: String? = p.role == .agentView ? "agents" : nil
+                return SessionRegistry.ScannedPane(
+                    paneId: p.paneId,
+                    pid: p.pid,
+                    cwd: p.cwd,
+                    displayTag: displayTag
+                )
             }
+            // `claude agents` (CC 2.1.139+) background sessions don't
+            // live in tmux, so they never show up in `panes`. Pull the
+            // supervisor state so the registry can tell which hook-only
+            // entries are still backed by a live worker, and so it has
+            // each session's display name on hand for disambiguating
+            // panes that share a cwd.
+            let daemonState = SessionRegistry.loadDaemonState()
             await MainActor.run {
-                registry.reconcileFromScan(panes)
+                registry.reconcileFromScan(panes, daemonState: daemonState)
                 registry.recomputeActivity()
             }
         }

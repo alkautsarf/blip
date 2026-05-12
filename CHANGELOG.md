@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-12
+
+### Added
+
+- **Roster-aware sessions overview.** The overview now reads `~/.claude/daemon/roster.json` every reconcile tick and surfaces every `claude agents` bg session — including idle ones that haven't fired a hook in blip's lifetime. Previously a bg session only appeared in blip after its first prompt cycle, so freshly-dispatched workers and long-idle ones stayed invisible.
+- **Bg session jump via `claude attach`.** Pressing ⌃⌥ Enter on a bg row opens a fresh tmux window running `claude attach <short-id>` and switches the tmux client to it. The window self-destructs on detach (`←`), so attach views are ephemeral and never accumulate. The claude binary is resolved to an absolute path (`~/.local/bin/claude` → `/opt/homebrew/bin/claude` → `/usr/local/bin/claude`) so the launchd-spawned BlipApp's `tmux new-window` command actually finds it — `/bin/sh` (tmux's default exec shell) doesn't source the user's login profile and lacks `~/.local/bin` on PATH.
+- **PaneId-based tmux jump.** Tmux-anchored rows resolve their target via `tmux display-message -t %paneId -p '#{session_name}:#{window_index}.#{pane_index}'` instead of the legacy `@cwd` pane-variable lookup. The `claude agents` dashboard window and any freshly-opened session jump cleanly without needing the `c:<repo>` window-name convention.
+- **Label priority chain.** Display tags resolve as: agents-supplied session name from `~/.claude/jobs/<short>/state.json` → enclosing git repo basename via `git rev-parse --git-common-dir` (so worktrees resolve to the parent repo, not the worktree directory) → cwd basename. Falls back to a cwd-basename suffix on residual conflicts when two entries land on the same tag.
+- **Transcript-mtime fast path for "working" detection.** If a session's JSONL was written in the last 15s and no Stop hook landed in the last 5s, the row reads `working` regardless of the hook flag. Catches bg sessions blip joined mid-turn (synthesized from the roster) and interactive sessions where the `UserPromptSubmit` hook fired before blip restarted. The 5s post-Stop guard prevents brief "working" flashes during Claude's session-summary metadata writes after a turn ends.
+
+### Changed
+
+- **Status simplified to working / idle.** Dropped the `done` label. Registry presence already implies alive (reconcile evicts dead entries), so calling alive-but-idle sessions `done` was misleading — interactive sessions sitting between prompts kept reading as finished.
+- **`claude agents` dashboard filtered from the overview.** The dashboard is a control surface for bg sessions, not a session itself; the bg sessions it manages now appear individually via the roster sync. The dashboard pane is detected by argv (`ClaudePaneScan.Role.agentView` when the first non-flag positional after the binary is `agents`).
+- **Roster is authoritative for bg liveness.** Hook-only entries (`tmuxPane == nil`) are evicted on the next 3s tick if their sessionId isn't in `roster.json`. The previous 5-minute "recent activity" grace window let one-shot `claude -p ...` runs, Task() subagents, and `Ctrl+X`'d sessions squat in the overview after the user thought they were done.
+
+### Fixed
+
+- **Subagent ghost rows.** Child claude processes spawned via Task() inherit the parent's `TMUX_PANE` env var, so their Stop hooks land in blip carrying the parent's pane id but the subdir's cwd. blip used to surface them as separate rows tagged with the subdir's basename (e.g. `aurelia` from a `.../anima/apps/web/public/aurelia` subagent invocation). Now reconcile evicts entries whose recorded cwd doesn't match the live pane's current path — the pane's `pane_current_path` is anchored to the parent's launch dir while claude runs foreground, so the mismatch is a reliable "this row is a child, not the actual occupant" signal.
+- **Prewarmed spare daemons no longer surface.** Workers with `dispatch.source == "spare"` hold a sessionId slot in roster.json but aren't user-dispatched sessions; they previously appeared as mysterious `Documents`-style rows tied to wherever the supervisor was launched from.
+- **Bg jump routes correctly from `.preview` and `.stack` states.** Auto-surfaced preview rows used to fall through to the legacy cwd-matching jump, which would land in an unrelated interactive pane that happened to share the bg session's cwd. The bg-attach + paneId routing is now uniform across `.sessions`, `.preview`, `.stack`, and `.peek` — `AppModel.currentJumpEntry()` resolves the focused entry per state and `JumpCoordinator` applies the same routing chain everywhere.
+- **`Documents` phantom from the agents dashboard removed.** Initially the dashboard pane was rendered as a `Documents` row (cwd basename of `~/Documents`); the `agents` label override later mapped it to `agents`, but the row was still double-counting. Filtering at the scanner removes it entirely.
+
 ## [0.4.4] - 2026-04-22
 
 ### Fixed
@@ -177,6 +200,7 @@ After upgrading to 0.4.0: `blip install` once, grant Accessibility to **Blip.app
 - Configurable via `blip config` (display, logLevel, menuBarEnabled, stopFallbackMessage)
 - Homebrew install via `alkautsarf/tap` (head-only strategy)
 
+[0.5.0]: https://github.com/alkautsarf/blip/releases/tag/v0.5.0
 [0.4.4]: https://github.com/alkautsarf/blip/releases/tag/v0.4.4
 [0.4.3]: https://github.com/alkautsarf/blip/releases/tag/v0.4.3
 [0.4.2]: https://github.com/alkautsarf/blip/releases/tag/v0.4.2
